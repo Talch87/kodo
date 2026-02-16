@@ -1,0 +1,9 @@
+[project]
+name = "selfocode"
+version = "0.1.0"
+requires-python = ">=3.10"
+packages = ["selfocode"]
+dependencies = [
+    "anthropic>=0.79.0",
+    "claude-agent-sdk",
+]
