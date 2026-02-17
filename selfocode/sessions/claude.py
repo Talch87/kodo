@@ -22,8 +22,13 @@ def _extract_tokens(usage: dict | None) -> tuple[int | None, int | None]:
 
 
 class ClaudeSession:
-    def __init__(self, model: str = "sonnet", max_budget_usd: float | None = None,
-                 system_prompt: str | None = None, chrome: bool = False):
+    def __init__(
+        self,
+        model: str = "sonnet",
+        max_budget_usd: float | None = None,
+        system_prompt: str | None = None,
+        chrome: bool = False,
+    ):
         self.model = model
         self.max_budget_usd = max_budget_usd
         self.system_prompt = system_prompt
@@ -42,7 +47,10 @@ class ClaudeSession:
         self._thread.start()
 
     async def _can_use_tool(
-        self, tool_name: str, tool_input: dict[str, Any], context: Any,
+        self,
+        tool_name: str,
+        tool_input: dict[str, Any],
+        context: Any,
     ) -> Any:
         """Handle tool permission requests.
 
@@ -119,9 +127,13 @@ class ClaudeSession:
         self._loop.close()
 
     def reset(self) -> None:
-        log.emit("session_reset", session="claude", model=self.model,
-                 tokens_before=self._stats.total_tokens,
-                 queries_before=self._stats.queries)
+        log.emit(
+            "session_reset",
+            session="claude",
+            model=self.model,
+            tokens_before=self._stats.total_tokens,
+            queries_before=self._stats.queries,
+        )
         self._disconnect()
         self._stats = SessionStats()
 
@@ -137,9 +149,14 @@ class ClaudeSession:
             self._plan_reviewed = True
             self._pending_plan = None
 
-        log.emit("session_query_start", session="claude", model=self.model,
-                 prompt=prompt, max_turns=max_turns,
-                 project_dir=str(project_dir))
+        log.emit(
+            "session_query_start",
+            session="claude",
+            model=self.model,
+            prompt=prompt,
+            max_turns=max_turns,
+            project_dir=str(project_dir),
+        )
 
         t0 = time.monotonic()
         self._run(self._client.query(prompt))
@@ -173,7 +190,7 @@ class ClaudeSession:
         if self._pending_plan:
             result = QueryResult(
                 text=f"[PROPOSED PLAN]\n{self._pending_plan}\n\n"
-                     f"[Agent is in plan mode, awaiting review]\n{result.text}",
+                f"[Agent is in plan mode, awaiting review]\n{result.text}",
                 elapsed_s=result.elapsed_s,
                 turns=result.turns,
                 cost_usd=result.cost_usd,
@@ -183,11 +200,17 @@ class ClaudeSession:
                 usage_raw=result.usage_raw,
             )
 
-        log.emit("session_query_end", session="claude", model=self.model,
-                 elapsed_s=result.elapsed_s, is_error=result.is_error,
-                 turns=result.turns, cost_usd=result.cost_usd,
-                 input_tokens=result.input_tokens,
-                 output_tokens=result.output_tokens,
-                 response_text=result.text,
-                 usage_raw=result.usage_raw)
+        log.emit(
+            "session_query_end",
+            session="claude",
+            model=self.model,
+            elapsed_s=result.elapsed_s,
+            is_error=result.is_error,
+            turns=result.turns,
+            cost_usd=result.cost_usd,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            response_text=result.text,
+            usage_raw=result.usage_raw,
+        )
         return result

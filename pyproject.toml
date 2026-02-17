@@ -3,10 +3,10 @@ name = "selfocode"
 version = "0.2.0"
 requires-python = ">=3.10"
 dependencies = [
-    "anthropic>=0.79.0",
     "claude-agent-sdk",
     "python-dotenv>=1.0",
     "simple-term-menu",
+    "pydantic-ai[anthropic,google]",
 ]
 
 [project.scripts]

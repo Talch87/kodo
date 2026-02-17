@@ -175,6 +175,7 @@ def test_report_truncated_at_3000(tmp_project: Path) -> None:
 
 # --- Exception handling tests (Bug 1 fix) ---
 
+
 class _CrashingSession(FakeSession):
     def query(self, prompt, project_dir, *, max_turns):
         raise RuntimeError("SDK connection lost")

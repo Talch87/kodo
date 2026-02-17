@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
-from selfocode.agent import Agent, AgentResult
+from selfocode.agent import Agent
 from selfocode.sessions.base import QueryResult, SessionStats
 
 
@@ -37,8 +36,12 @@ class FakeSession:
         self._stats = SessionStats()
 
 
-def make_agent(response_text: str = "done", prompt: str = "Test agent.",
-               is_error: bool = False, max_turns: int = 10) -> Agent:
+def make_agent(
+    response_text: str = "done",
+    prompt: str = "Test agent.",
+    is_error: bool = False,
+    max_turns: int = 10,
+) -> Agent:
     """Create an Agent backed by a FakeSession."""
     session = FakeSession(response_text=response_text, is_error=is_error)
     return Agent(session, prompt, max_turns=max_turns)  # positional → description

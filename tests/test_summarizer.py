@@ -9,8 +9,10 @@ from selfocode.summarizer import Summarizer
 
 def _make_summarizer():
     """Create a summarizer with truncation backend (no external deps)."""
-    with patch("selfocode.summarizer._probe_ollama", return_value=None), \
-         patch("selfocode.summarizer._probe_gemini", return_value=None):
+    with (
+        patch("selfocode.summarizer._probe_ollama", return_value=None),
+        patch("selfocode.summarizer._probe_gemini", return_value=None),
+    ):
         return Summarizer()
 
 

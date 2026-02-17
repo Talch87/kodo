@@ -25,8 +25,13 @@ class CursorSession:
         return self._stats
 
     def reset(self) -> None:
-        log.emit("session_reset", session="cursor", model=self.model,
-                 chat_id=self._chat_id, queries_before=self._stats.queries)
+        log.emit(
+            "session_reset",
+            session="cursor",
+            model=self.model,
+            chat_id=self._chat_id,
+            queries_before=self._stats.queries,
+        )
         self._chat_id = None
         self._stats = SessionStats()
         self._system_prompt_sent = False
@@ -41,9 +46,12 @@ class CursorSession:
             "cursor-agent",
             "-p",
             "-f",
-            "--output-format", "stream-json",
-            "--model", self.model,
-            "--workspace", str(project_dir),
+            "--output-format",
+            "stream-json",
+            "--model",
+            self.model,
+            "--workspace",
+            str(project_dir),
         ]
 
         if self._chat_id:
@@ -51,9 +59,14 @@ class CursorSession:
 
         cmd.append(prompt)
 
-        log.emit("session_query_start", session="cursor", model=self.model,
-                 prompt=prompt, chat_id=self._chat_id,
-                 project_dir=str(project_dir))
+        log.emit(
+            "session_query_start",
+            session="cursor",
+            model=self.model,
+            prompt=prompt,
+            chat_id=self._chat_id,
+            project_dir=str(project_dir),
+        )
 
         t0 = time.monotonic()
         result_text = ""
@@ -106,11 +119,17 @@ class CursorSession:
 
         self._stats.queries += 1
 
-        log.emit("session_query_end", session="cursor", model=self.model,
-                 elapsed_s=elapsed, is_error=is_error,
-                 chat_id=self._chat_id, returncode=proc.returncode,
-                 response_text=result_text or stderr_text,
-                 raw_messages=raw_messages)
+        log.emit(
+            "session_query_end",
+            session="cursor",
+            model=self.model,
+            elapsed_s=elapsed,
+            is_error=is_error,
+            chat_id=self._chat_id,
+            returncode=proc.returncode,
+            response_text=result_text or stderr_text,
+            raw_messages=raw_messages,
+        )
 
         return QueryResult(
             text=result_text or stderr_text,

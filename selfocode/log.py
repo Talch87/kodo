@@ -24,6 +24,8 @@ def init(project_dir: Path, run_id: str | None = None) -> Path:
     """Initialize logging for a run. Returns the log file path."""
     global _log_file, _run_id, _start_time
 
+    from selfocode import __version__
+
     _run_id = run_id or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     _start_time = time.monotonic()
 
@@ -31,7 +33,12 @@ def init(project_dir: Path, run_id: str | None = None) -> Path:
     log_dir.mkdir(parents=True, exist_ok=True)
     _log_file = log_dir / f"{_run_id}.jsonl"
 
-    emit("run_init", project_dir=str(project_dir))
+    emit("run_init", project_dir=str(project_dir), version=__version__)
+    return _log_file
+
+
+def get_log_file() -> Path | None:
+    """Return the current log file path, or None if not initialized."""
     return _log_file
 
 

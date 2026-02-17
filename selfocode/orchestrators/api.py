@@ -1,10 +1,19 @@
-"""Orchestrator using the Anthropic API directly with tool_use."""
+"""Orchestrator using Pydantic AI with tool_use (Anthropic, Gemini, etc.)."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import anthropic
+from pydantic_ai import Agent, Tool
+from pydantic_ai.exceptions import UsageLimitExceeded
+from pydantic_ai.messages import (
+    ModelRequest,
+    ModelResponse,
+    TextPart,
+    ToolCallPart,
+    ToolReturnPart,
+)
+from pydantic_ai.usage import UsageLimits
 
 from selfocode import log
 from selfocode.summarizer import Summarizer
@@ -12,41 +21,157 @@ from selfocode.orchestrators.base import (
     ORCHESTRATOR_SYSTEM_PROMPT,
     CycleResult,
     OrchestratorBase,
-    RunResult,
     TeamConfig,
-    build_team_tools,
     verify_done,
 )
 
 # Per-1M-token pricing: (input, output)
 _MODEL_PRICING: dict[str, tuple[float, float]] = {
-    "claude-opus-4-6": (15, 75),
+    "claude-opus-4-6": (5, 25),
     "claude-sonnet-4-5-20250929": (3, 15),
+    "gemini-3-pro-preview": (2.0, 12.0),
+    "gemini-3-flash-preview": (0.50, 3.0),
+}
+
+# Map our model IDs to pydantic-ai model strings (provider:model).
+_PYDANTIC_MODEL_MAP: dict[str, str] = {
+    "claude-opus-4-6": "anthropic:claude-opus-4-6",
+    "claude-sonnet-4-5-20250929": "anthropic:claude-sonnet-4-5-20250929",
+    "gemini-3-pro-preview": "google-gla:gemini-3-pro-preview",
+    "gemini-3-flash-preview": "google-gla:gemini-3-flash-preview",
 }
 
 
-def _messages_to_text(messages: list[dict]) -> str:
-    """Flatten messages to text for summarization."""
-    parts = []
+class _DoneSignal:
+    """Shared mutable to communicate between the `done` tool and the cycle."""
+
+    def __init__(self) -> None:
+        self.called = False
+        self.summary = ""
+        self.success = False
+
+
+def _build_tools(
+    team: TeamConfig,
+    project_dir: Path,
+    summarizer: Summarizer,
+    done_signal: _DoneSignal,
+    goal: str,
+) -> list[Tool]:
+    """Build pydantic-ai Tool objects for each team agent + the done tool."""
+    tools: list[Tool] = []
+
+    for name, agent in team.items():
+
+        def _make_handler(agent_name: str, agent_obj):
+            def handler(task: str, new_conversation: bool = False) -> str:
+                log.tprint(f"[orchestrator] → {agent_name}: {task[:100]}...")
+                if new_conversation:
+                    log.tprint("[orchestrator]   (new conversation)")
+
+                log.emit(
+                    "orchestrator_tool_call",
+                    agent=agent_name,
+                    task=task,
+                    new_conversation=new_conversation,
+                )
+
+                agent_result = agent_obj.run(
+                    task,
+                    project_dir,
+                    new_conversation=new_conversation,
+                    agent_name=agent_name,
+                )
+
+                report = agent_result.format_report()[:10000]
+                log.emit(
+                    "orchestrator_tool_result",
+                    agent=agent_name,
+                    elapsed_s=agent_result.elapsed_s,
+                    is_error=agent_result.is_error,
+                    context_reset=agent_result.context_reset,
+                    session_tokens=agent_result.session_tokens,
+                    report=report,
+                )
+
+                log.tprint(
+                    f"[{agent_name}] done ({agent_result.elapsed_s:.1f}s)"
+                    f" | session: {agent_result.session_tokens:,} tokens"
+                )
+                if agent_result.is_error:
+                    log.tprint(f"[{agent_name}] reported error")
+                if agent_result.context_reset:
+                    log.tprint(
+                        f"[{agent_name}] context reset: {agent_result.context_reset_reason}"
+                    )
+
+                summarizer.summarize(agent_name, task, report)
+                return report
+
+            return handler
+
+        tools.append(
+            Tool(
+                _make_handler(name, agent),
+                name=f"ask_{name}",
+                description=f"Delegate a task to the {name} agent.\n{agent.description.strip()}",
+                takes_ctx=False,
+            )
+        )
+
+    def done(summary: str, success: bool) -> str:
+        """Signal that the goal is complete (or cannot be completed).
+        This triggers automated verification by the tester and architect.
+        If they find issues, the call is rejected and you must fix them first."""
+        log.emit("orchestrator_done_attempt", summary=summary, success=success)
+        log.tprint(f"[orchestrator] DONE requested (success={success}): {summary}")
+
+        if not success:
+            done_signal.called = True
+            done_signal.summary = summary
+            done_signal.success = False
+            return "Acknowledged (marked as unsuccessful)."
+
+        rejection = verify_done(goal, summary, team, project_dir)
+        if rejection:
+            log.emit("orchestrator_done_rejected", rejection=rejection[:5000])
+            log.tprint("[done] REJECTED — verification found issues")
+            return rejection
+
+        done_signal.called = True
+        done_signal.summary = summary
+        done_signal.success = True
+        log.emit("orchestrator_done_accepted", summary=summary)
+        log.tprint("[done] ACCEPTED — all checks pass")
+        return "Verified and accepted. All checks pass."
+
+    tools.append(Tool(done, takes_ctx=False))
+    return tools
+
+
+def _messages_to_text(messages: list) -> str:
+    """Flatten pydantic-ai message history to text for summarization."""
+    parts: list[str] = []
     for msg in messages:
-        role = msg["role"]
-        content = msg["content"]
-        if isinstance(content, str):
-            parts.append(f"[{role}] {content[:500]}")
-        elif isinstance(content, list):
-            for item in content:
-                if hasattr(item, "text"):
-                    parts.append(f"[{role}] {item.text[:300]}")
-                elif hasattr(item, "name"):
-                    parts.append(f"[{role}] tool_use: {item.name}")
-                elif isinstance(item, dict) and item.get("type") == "tool_result":
-                    text = str(item.get("content", ""))[:300]
-                    parts.append(f"[{role}] tool_result: {text}")
+        if isinstance(msg, ModelRequest):
+            for part in msg.parts:
+                if hasattr(part, "content") and isinstance(part.content, str):
+                    parts.append(f"[user] {part.content[:500]}")
+                elif isinstance(part, ToolReturnPart):
+                    parts.append(
+                        f"[user] tool_result({part.tool_name}): {str(part.content)[:300]}"
+                    )
+        elif isinstance(msg, ModelResponse):
+            for part in msg.parts:
+                if isinstance(part, TextPart):
+                    parts.append(f"[assistant] {part.content[:300]}")
+                elif isinstance(part, ToolCallPart):
+                    parts.append(f"[assistant] tool_use: {part.tool_name}")
     return "\n".join(parts)
 
 
 class ApiOrchestrator(OrchestratorBase):
-    """Orchestrator backed by direct Anthropic API calls with tool_use."""
+    """Orchestrator backed by Pydantic AI (supports Anthropic, Gemini, etc.)."""
 
     def __init__(
         self,
@@ -56,7 +181,7 @@ class ApiOrchestrator(OrchestratorBase):
         self.model = model
         self._orchestrator_name = "api"
         self.max_context_tokens = max_context_tokens
-        self._client = anthropic.Anthropic()
+        self._pydantic_model = _PYDANTIC_MODEL_MAP.get(model, model)
         self._summarizer = Summarizer()
 
     def cycle(
@@ -68,188 +193,105 @@ class ApiOrchestrator(OrchestratorBase):
         max_exchanges: int = 30,
         prior_summary: str = "",
     ) -> CycleResult:
-        tools = build_team_tools(team)
+        done_signal = _DoneSignal()
+        tools = _build_tools(team, project_dir, self._summarizer, done_signal, goal)
         result = CycleResult()
 
         prompt = f"# Goal\n\n{goal}\n\nProject directory: {project_dir}"
         if prior_summary:
-            prompt += f"\n\n# Previous progress\n\n{prior_summary}\n\nContinue working toward the goal."
-        messages = [{"role": "user", "content": prompt}]
-
-        log.emit("cycle_start", orchestrator="api", model=self.model,
-                 goal=goal, project_dir=str(project_dir),
-                 max_exchanges=max_exchanges, has_prior_summary=bool(prior_summary),
-                 prior_summary=prior_summary or None)
-
-        for exchange in range(1, max_exchanges + 1):
-            result.exchanges = exchange
-
-            # Check orchestrator context limit
-            if self.max_context_tokens:
-                est_tokens = len(_messages_to_text(messages)) // 3
-                if est_tokens >= self.max_context_tokens:
-                    log.tprint(f"[orchestrator] context limit reached (~{est_tokens:,} tokens)")
-                    log.emit("cycle_context_limit", est_tokens=est_tokens,
-                             limit=self.max_context_tokens)
-                    result.summary = self._summarize(messages)
-                    break
-
-            log.tprint(f"\n[orchestrator] thinking... (exchange {exchange}/{max_exchanges})")
-
-            response = self._client.messages.create(
-                model=self.model,
-                max_tokens=4096,
-                system=ORCHESTRATOR_SYSTEM_PROMPT,
-                tools=tools,
-                messages=messages,
+            prompt += (
+                f"\n\n# Previous progress\n\n{prior_summary}"
+                "\n\nContinue working toward the goal."
             )
 
-            if response.usage:
-                inp = response.usage.input_tokens
-                out = response.usage.output_tokens
-                price_in, price_out = _MODEL_PRICING.get(self.model, (0, 0))
-                result.total_cost_usd += (inp * price_in + out * price_out) / 1_000_000
+        log.emit(
+            "cycle_start",
+            orchestrator="api",
+            model=self.model,
+            goal=goal,
+            project_dir=str(project_dir),
+            max_exchanges=max_exchanges,
+            has_prior_summary=bool(prior_summary),
+            prior_summary=prior_summary or None,
+        )
 
-            assistant_content = response.content
+        agent = Agent(
+            self._pydantic_model,
+            system_prompt=ORCHESTRATOR_SYSTEM_PROMPT,
+            tools=tools,
+        )
 
-            # Log raw orchestrator response
-            raw_blocks = []
-            for block in assistant_content:
-                if block.type == "text":
-                    raw_blocks.append({"type": "text", "text": block.text})
-                elif block.type == "tool_use":
-                    raw_blocks.append({"type": "tool_use", "name": block.name,
-                                       "id": block.id, "input": block.input})
-            log.emit("orchestrator_response", exchange=exchange,
-                     stop_reason=response.stop_reason,
-                     input_tokens=getattr(response.usage, "input_tokens", None),
-                     output_tokens=getattr(response.usage, "output_tokens", None),
-                     content=raw_blocks)
+        log.tprint(f"\n[orchestrator] starting cycle (max {max_exchanges} requests)...")
 
-            messages.append({"role": "assistant", "content": assistant_content})
+        try:
+            run_result = agent.run_sync(
+                prompt,
+                usage_limits=UsageLimits(request_limit=max_exchanges),
+            )
+        except UsageLimitExceeded:
+            log.tprint(f"[orchestrator] request limit reached ({max_exchanges})")
+            # Even on limit, we can still get partial usage from the exception context.
+            # Fall through to done_signal check below.
+            run_result = None
 
-            for block in assistant_content:
-                if block.type == "text" and block.text.strip():
-                    log.tprint(f"[orchestrator] {block.text.strip()[:200]}")
+        if run_result is not None:
+            usage = run_result.usage()
+            price_in, price_out = _MODEL_PRICING.get(self.model, (0, 0))
+            result.total_cost_usd = (
+                usage.input_tokens * price_in + usage.output_tokens * price_out
+            ) / 1_000_000
+            result.exchanges = usage.requests
 
-            if response.stop_reason != "tool_use":
-                log.tprint("[orchestrator] stopped without calling a tool (done not called)")
-                result.summary = self._summarize(messages)
-                log.emit("cycle_end", reason="stop_no_tool", exchanges=exchange,
-                         finished=False, summary=result.summary,
-                         cost_usd=result.total_cost_usd)
-                break
-
-            tool_results = []
-            for block in assistant_content:
-                if block.type != "tool_use":
-                    continue
-
-                if block.name == "done":
-                    done_summary = block.input.get("summary", "")
-                    done_success = block.input.get("success", True)
-                    log.tprint(f"[orchestrator] DONE requested: {done_summary}")
-                    log.emit("orchestrator_done_attempt", summary=done_summary,
-                             success=done_success, exchanges=exchange)
-
-                    if done_success:
-                        rejection = verify_done(goal, done_summary, team, project_dir)
-                        if rejection:
-                            log.emit("orchestrator_done_rejected", rejection=rejection[:5000])
-                            log.tprint(f"[done] REJECTED — verification found issues")
-                            tool_results.append({
-                                "type": "tool_result",
-                                "tool_use_id": block.id,
-                                "content": rejection,
-                            })
-                            continue
-
-                    result.finished = True
-                    result.success = done_success
-                    result.summary = done_summary
-                    log.emit("orchestrator_done_accepted", summary=done_summary,
-                             success=done_success, exchanges=exchange,
-                             cost_usd=result.total_cost_usd)
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": "Verified and accepted. All checks pass.",
-                    })
-                    messages.append({"role": "user", "content": tool_results})
-                    return result
-
-                agent_name = block.name.removeprefix("ask_")
-                agent = team.get(agent_name)
-                if not agent:
-                    log.emit("orchestrator_tool_error", agent=agent_name,
-                             error=f"no agent named '{agent_name}'")
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": f"Error: no agent named '{agent_name}'",
-                        "is_error": True,
-                    })
-                    continue
-
-                task = block.input.get("task", "")
-                new_conversation = block.input.get("new_conversation", False)
-                log.tprint(f"[orchestrator] → {agent_name}: {task[:100]}...")
-                if new_conversation:
-                    log.tprint(f"[orchestrator]   (new conversation)")
-
-                log.emit("orchestrator_tool_call", agent=agent_name, task=task,
-                         new_conversation=new_conversation, tool_use_id=block.id)
-
-                agent_result = agent.run(task, project_dir,
-                                         new_conversation=new_conversation,
-                                         agent_name=agent_name)
-
-                report = agent_result.format_report()[:10000]
-                log.emit("orchestrator_tool_result", agent=agent_name,
-                         elapsed_s=agent_result.elapsed_s,
-                         is_error=agent_result.is_error,
-                         context_reset=agent_result.context_reset,
-                         session_tokens=agent_result.session_tokens,
-                         report=report)
-
-                log.tprint(f"[{agent_name}] done ({agent_result.elapsed_s:.1f}s) | session: {agent_result.session_tokens:,} tokens")
-                if agent_result.is_error:
-                    log.tprint(f"[{agent_name}] reported error")
-                if agent_result.context_reset:
-                    log.tprint(f"[{agent_name}] context reset: {agent_result.context_reset_reason}")
-
-                self._summarizer.summarize(agent_name, task, report)
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": report,
-                })
-
-            messages.append({"role": "user", "content": tool_results})
+        if done_signal.called:
+            result.finished = True
+            result.success = done_signal.success
+            result.summary = done_signal.summary
+            log.emit(
+                "cycle_end",
+                reason="done",
+                exchanges=result.exchanges,
+                finished=True,
+                summary=result.summary,
+                cost_usd=result.total_cost_usd,
+            )
         else:
-            result.summary = self._summarize(messages)
-            log.tprint(f"[orchestrator] exchange limit reached ({max_exchanges})")
-            log.emit("cycle_end", reason="exchange_limit", exchanges=max_exchanges,
-                     finished=False, summary=result.summary,
-                     cost_usd=result.total_cost_usd)
+            # Model stopped without calling done — summarize for next cycle.
+            if run_result is not None:
+                result.summary = self._summarize(run_result.all_messages())
+            else:
+                # UsageLimitExceeded — use accumulated agent summaries.
+                accumulated = self._summarizer.get_accumulated_summary()
+                result.summary = (
+                    f"[Cycle ended: hit request limit after {max_exchanges} requests. "
+                    f"Work so far:]\n{accumulated}"
+                    if accumulated
+                    else "[Cycle ended: hit request limit. No summary available.]"
+                )
+            log.emit(
+                "cycle_end",
+                reason="stop_no_done" if run_result else "request_limit",
+                exchanges=result.exchanges,
+                finished=False,
+                summary=result.summary,
+                cost_usd=result.total_cost_usd,
+            )
 
         return result
 
-    def _summarize(self, messages: list[dict]) -> str:
-        """Compress conversation into a summary."""
+    def _summarize(self, messages: list) -> str:
+        """Compress conversation into a summary using a simple agent."""
         log.emit("summarize_start", message_count=len(messages))
-        response = self._client.messages.create(
-            model=self.model,
-            max_tokens=2048,
-            system=(
+
+        summarizer_agent = Agent(
+            self._pydantic_model,
+            system_prompt=(
                 "Summarize this orchestration conversation concisely. "
                 "Include: what was accomplished, what's pending, any known issues."
             ),
-            messages=[
-                {"role": "user", "content": f"Conversation:\n\n{_messages_to_text(messages)}"},
-            ],
         )
-        summary = response.content[0].text
+        summary_result = summarizer_agent.run_sync(
+            f"Conversation:\n\n{_messages_to_text(messages)}",
+        )
+        summary = summary_result.output
         log.emit("summarize_end", summary=summary)
         return summary
-

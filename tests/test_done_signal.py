@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from selfocode.orchestrators.claude_code import _DoneSignal, _build_mcp_server
 from selfocode.summarizer import Summarizer
@@ -13,8 +13,10 @@ from tests.conftest import make_agent
 def _make_done_handler(team, project_dir, goal="Build X"):
     """Build the MCP server and extract the `done` handler function."""
     signal = _DoneSignal()
-    with patch("selfocode.summarizer._probe_ollama", return_value=None), \
-         patch("selfocode.summarizer._probe_gemini", return_value=None):
+    with (
+        patch("selfocode.summarizer._probe_ollama", return_value=None),
+        patch("selfocode.summarizer._probe_gemini", return_value=None),
+    ):
         summarizer = Summarizer()
     mcp = _build_mcp_server(team, project_dir, summarizer, signal, goal)
 

@@ -44,11 +44,13 @@ def _probe_gemini() -> str | None:
 
 def _summarize_ollama(model: str, task: str, report: str) -> str:
     prompt = _PROMPT_TEMPLATE.format(task=task[:200], report=report[:2000])
-    payload = json.dumps({
-        "model": model,
-        "prompt": prompt,
-        "stream": False,
-    }).encode()
+    payload = json.dumps(
+        {
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+        }
+    ).encode()
     req = urllib.request.Request(
         "http://localhost:11434/api/generate",
         data=payload,
@@ -66,9 +68,11 @@ def _summarize_gemini(api_key: str, task: str, report: str) -> str:
         "https://generativelanguage.googleapis.com/v1beta/models/"
         f"gemini-2.0-flash-lite:generateContent?key={api_key}"
     )
-    payload = json.dumps({
-        "contents": [{"parts": [{"text": prompt}]}],
-    }).encode()
+    payload = json.dumps(
+        {
+            "contents": [{"parts": [{"text": prompt}]}],
+        }
+    ).encode()
     req = urllib.request.Request(
         url,
         data=payload,

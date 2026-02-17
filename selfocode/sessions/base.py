@@ -22,6 +22,7 @@ class QueryResult:
 @dataclass
 class SessionStats:
     """Cumulative stats for the current session."""
+
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     total_cost_usd: float = 0.0
@@ -36,6 +37,8 @@ class Session(Protocol):
     @property
     def stats(self) -> SessionStats: ...
 
-    def query(self, prompt: str, project_dir: Path, *, max_turns: int) -> QueryResult: ...
+    def query(
+        self, prompt: str, project_dir: Path, *, max_turns: int
+    ) -> QueryResult: ...
 
     def reset(self) -> None: ...

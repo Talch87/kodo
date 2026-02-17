@@ -36,8 +36,8 @@ def test_agent_description_in_tool() -> None:
     tools = build_team_tools(team)
     worker_tool = next(t for t in tools if t["name"] == "ask_worker")
     assert "A skilled coder." in worker_tool["description"]
-    # Only first line used
-    assert "More details" not in worker_tool["description"]
+    # Full description is included
+    assert "More details" in worker_tool["description"]
 
 
 def test_tool_schema_has_required_task() -> None:

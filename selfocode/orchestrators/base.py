@@ -16,6 +16,7 @@ TeamConfig = dict[str, Agent]
 @dataclass
 class CycleResult:
     """Result of a single orchestration cycle (one 'day of work')."""
+
     exchanges: int = 0
     total_cost_usd: float = 0.0
     finished: bool = False
@@ -26,6 +27,7 @@ class CycleResult:
 @dataclass
 class RunResult:
     """Result of a full multi-cycle run."""
+
     cycles: list[CycleResult] = field(default_factory=list)
 
     @property
@@ -45,99 +47,91 @@ class RunResult:
         return self.cycles[-1].summary if self.cycles else ""
 
 
-ORCHESTRATOR_SYSTEM_PROMPT = """\
+ORCHESTRATOR_SYSTEM_PROMPT = """
 You are an orchestrator managing a team of AI agents working on a software project.
 
-Your job:
-1. Read the goal and pick ONE small, concrete thing to build first.
-2. Delegate it to the worker with a SHORT directive (2-5 sentences). \
-Describe the desired behavior, not the implementation. No file lists, \
-no module structures, no code snippets — the worker is a skilled coder.
-3. After 1-2 worker steps, ask the tester to verify ("a user should be able to...").
-4. Fix any issues the tester finds before moving on.
-5. Pick the NEXT small thing. Repeat until done, then call the `done` tool.
+Your strategy: leverage the AI workers to solve low level problems, you ensure 
+1) right direction: 
+ - sound architecture, 
+ - right libraries, 
+ - right user experience being built.
+The insight behind is: worker AI can implement almost any well-formulated feature,
+but its risk is building the wrong thing. 
+ 
+2) quality control and incremental improvements.
+ - you build tools to control quality along the way. You try to boldly test things user will care about and experience.
+ - you have strong unit test suite
+ - you use git to commit only useful work, you can revert if some iteration just can't get to a good place.
+ - Therefore you work in small iterations, putting small goals, verifying they are accomplished well w/o technical debt.
 
-Task sizing:
-- Each worker task should be ONE feature or change that can be built and tested independently.
-Example: in a new TD game project
-- BAD: "Set up the entire project with 12 modules, 5 tower types, 5 enemy types, \
-full HUD layout, save/load, procedural generation, and input handling."
-- GOOD: "Create a new Rust project with a terminal UI that shows a main menu \
-with New Game and Quit options."
-- Then GOOD next step: "Add a grid-based map that generates a winding path \
-from the left edge to a crystal in the center."
-- Let the worker make all implementation decisions (library choices, module structure, \
-naming, architecture). Just describe what the user should see or experience.
+Insight: sometimes iterations of work are 
+not helpful - code comes out too complex, either because the task turns out to have contradictions /
+technical obstacles or just because worker AI lacked good architectural insight or was sloppy.
+You ensure each iteration moves the project forward: 
+more clarify, better core abstractions, more useful testing tools.
 
-Handling agent responses:
-- If a worker result contains [PROPOSED PLAN], review it. \
-If the plan looks good, tell the worker: "Plan approved, proceed with implementation." \
-If you want changes, describe them clearly and the worker will revise.
-- If a worker seems stuck or unproductive, reset its conversation \
-(new_conversation=true) and give a clear, fresh directive.
-- Don't repeat a failing directive more than twice — revise the approach.
+1. You study the goal and draft a final vision of where you want to get. 
+2. You break it down into checkpoints - the verifiable states your product will go through on the path to the final desired state.
+3. You break work towards closest checkpoint down into small incremental tasks. You control completion of incremental tasks. You commit them.
+4. You revisit your plan as you discover facts about the domain and technology and adapt.
 
-Guidelines:
-- Don't dictate implementation — describe the goal and let agents decide how.
-- If a worker needs context about existing code, let it read the codebase (it can).
-- If the project directory already has code, have the worker read it before making changes.
-
-Context management:
-- Each agent tool result includes context stats (tokens used, queries in session).
-- If an agent's context was auto-reset (you'll see "[Context was reset: ...]" in the result), \
-give it enough context in your next directive to continue effectively.
-"""
+When communicating with agents, give high level goals and let them figure out details.
+""".strip()
 
 
 def build_team_tools(team: TeamConfig) -> list[dict]:
     """Build Anthropic-style tool definitions from a team config."""
     tools = []
     for name, agent in team.items():
-        desc = agent.description.strip().split("\n")[0]
-        tools.append({
-            "name": f"ask_{name}",
-            "description": f"Delegate a task to the {name} agent. {desc}",
+        tools.append(
+            {
+                "name": f"ask_{name}",
+                "description": f"Delegate a task to the {name} agent.\n{agent.description.strip()}",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "task": {
+                            "type": "string",
+                            "description": f"The directive/task to give to {name}.",
+                        },
+                        "new_conversation": {
+                            "type": "boolean",
+                            "description": "Reset agent's session (rarely needed). Default: false.",
+                        },
+                    },
+                    "required": ["task"],
+                },
+            }
+        )
+
+    tools.append(
+        {
+            "name": "done",
+            "description": "Signal that the goal is complete (or cannot be completed). "
+            "This triggers automated verification by the tester and architect. "
+            "If they find issues, the call is rejected and you must fix them first.",
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "task": {
+                    "summary": {
                         "type": "string",
-                        "description": f"The directive/task to give to {name}.",
+                        "description": "Summary of what was accomplished.",
                     },
-                    "new_conversation": {
+                    "success": {
                         "type": "boolean",
-                        "description": "Reset agent's session (rarely needed). Default: false.",
+                        "description": "Whether the goal was achieved.",
                     },
                 },
-                "required": ["task"],
+                "required": ["summary", "success"],
             },
-        })
-
-    tools.append({
-        "name": "done",
-        "description": "Signal that the goal is complete (or cannot be completed). "
-                       "This triggers automated verification by the tester and architect. "
-                       "If they find issues, the call is rejected and you must fix them first.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "summary": {
-                    "type": "string",
-                    "description": "Summary of what was accomplished.",
-                },
-                "success": {
-                    "type": "boolean",
-                    "description": "Whether the goal was achieved.",
-                },
-            },
-            "required": ["summary", "success"],
-        },
-    })
+        }
+    )
     return tools
 
 
-def verify_done(goal: str, summary: str, team: TeamConfig,
-                project_dir: Path) -> str | None:
+def verify_done(
+    goal: str, summary: str, team: TeamConfig, project_dir: Path
+) -> str | None:
     """Run tester + architect to verify the goal is met.
 
     Returns None if all checks pass, or a rejection message with issues found.
@@ -162,13 +156,21 @@ def verify_done(goal: str, summary: str, team: TeamConfig,
         try:
             log.tprint(f"[done] running {tester_name} verification...")
             tester_result = tester_agent.run(
-                verification_prompt + "Verify this works end-to-end. Report ONLY issues found. "
+                verification_prompt
+                + "Verify this works end-to-end. Report ONLY issues found. "
                 "If everything works, say 'ALL CHECKS PASS'.",
-                project_dir, new_conversation=True, agent_name=f"{tester_name}_verification")
+                project_dir,
+                new_conversation=True,
+                agent_name=f"{tester_name}_verification",
+            )
             tester_report = tester_result.text or ""
-            log.emit("done_verification", agent=tester_name, report=tester_report[:5000])
+            log.emit(
+                "done_verification", agent=tester_name, report=tester_report[:5000]
+            )
             if "ALL CHECKS PASS" not in tester_report.upper():
-                issues.append(f"**{tester_name} found issues:**\n{tester_report[:3000]}")
+                issues.append(
+                    f"**{tester_name} found issues:**\n{tester_report[:3000]}"
+                )
         except Exception as exc:
             log.emit("done_verification_error", agent=tester_name, error=str(exc))
             issues.append(f"**{tester_name} crashed:** {exc}")
@@ -178,12 +180,18 @@ def verify_done(goal: str, summary: str, team: TeamConfig,
         try:
             log.tprint("[done] running architect verification...")
             architect_result = architect_agent.run(
-                verification_prompt + "Review the codebase for critical bugs, missing features, "
+                verification_prompt
+                + "Review the codebase for critical bugs, missing features, "
                 "or deviations from the goal. Report ONLY issues found. "
                 "If everything looks good, say 'ALL CHECKS PASS'.",
-                project_dir, new_conversation=True, agent_name="architect_verification")
+                project_dir,
+                new_conversation=True,
+                agent_name="architect_verification",
+            )
             architect_report = architect_result.text or ""
-            log.emit("done_verification", agent="architect", report=architect_report[:5000])
+            log.emit(
+                "done_verification", agent="architect", report=architect_report[:5000]
+            )
             if "ALL CHECKS PASS" not in architect_report.upper():
                 issues.append(f"**Architect found issues:**\n{architect_report[:3000]}")
         except Exception as exc:
@@ -258,21 +266,33 @@ class OrchestratorBase:
     ) -> RunResult:
         from selfocode import log
 
-        log.emit("run_start", orchestrator=self._orchestrator_name, model=self.model,
-                 goal=goal, project_dir=str(project_dir),
-                 max_exchanges=max_exchanges, max_cycles=max_cycles,
-                 team=list(team.keys()))
+        log.emit(
+            "run_start",
+            orchestrator=self._orchestrator_name,
+            model=self.model,
+            goal=goal,
+            project_dir=str(project_dir),
+            max_exchanges=max_exchanges,
+            max_cycles=max_cycles,
+            team=list(team.keys()),
+        )
         result = RunResult()
         prior_summary = ""
 
         for i in range(1, max_cycles + 1):
             if i > 1:
                 log.tprint(f"\n[orchestrator] === CYCLE {i}/{max_cycles} ===")
-            log.emit("run_cycle", orchestrator=self._orchestrator_name,
-                     cycle=i, max_cycles=max_cycles)
+            log.emit(
+                "run_cycle",
+                orchestrator=self._orchestrator_name,
+                cycle=i,
+                max_cycles=max_cycles,
+            )
 
             cycle_result = self.cycle(
-                goal, project_dir, team,
+                goal,
+                project_dir,
+                team,
                 max_exchanges=max_exchanges,
                 prior_summary=prior_summary,
             )
@@ -289,8 +309,21 @@ class OrchestratorBase:
         for agent in team.values():
             agent.close()
 
-        log.emit("run_end", orchestrator=self._orchestrator_name,
-                 total_cycles=len(result.cycles), finished=result.finished,
-                 total_cost_usd=result.total_cost_usd,
-                 total_exchanges=result.total_exchanges, summary=result.summary)
+        log.emit(
+            "run_end",
+            orchestrator=self._orchestrator_name,
+            total_cycles=len(result.cycles),
+            finished=result.finished,
+            total_cost_usd=result.total_cost_usd,
+            total_exchanges=result.total_exchanges,
+            summary=result.summary,
+        )
+
+        # Open the HTML log viewer for easy inspection
+        log_file = log.get_log_file()
+        if log_file and log_file.exists():
+            from selfocode.viewer import open_viewer
+
+            open_viewer(log_file)
+
         return result

@@ -37,6 +37,7 @@ they can type /exit to proceed."""
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def get_goal() -> str:
     """Prompt user for a multiline goal. Empty line finishes input."""
     print("\nWhat's your goal? (Enter an empty line to finish)")
@@ -61,7 +62,9 @@ def _extract_intake_transcript(project_dir: Path, session_id: str) -> None:
     """Extract human-readable transcript from a Claude Code session file."""
     # Claude stores sessions under ~/.claude/projects/<escaped-path>/<session-id>.jsonl
     escaped = str(project_dir).replace("/", "-")
-    session_file = Path.home() / ".claude" / "projects" / escaped / f"{session_id}.jsonl"
+    session_file = (
+        Path.home() / ".claude" / "projects" / escaped / f"{session_id}.jsonl"
+    )
     if not session_file.exists():
         return
 
@@ -75,7 +78,11 @@ def _extract_intake_transcript(project_dir: Path, session_id: str) -> None:
         if msg_type not in ("user", "assistant"):
             continue
 
-        content = d.get("message", {}).get("content", "") if isinstance(d.get("message"), dict) else ""
+        content = (
+            d.get("message", {}).get("content", "")
+            if isinstance(d.get("message"), dict)
+            else ""
+        )
 
         # Skip system/command messages
         if isinstance(content, str) and content.startswith("<"):
@@ -89,9 +96,9 @@ def _extract_intake_transcript(project_dir: Path, session_id: str) -> None:
                     if block.get("type") == "text":
                         parts.append(block["text"])
                     elif block.get("type") == "tool_use":
-                        parts.append(f'*[Tool: {block["name"]}]*')
+                        parts.append(f"*[Tool: {block['name']}]*")
                     elif block.get("type") == "tool_result":
-                        parts.append(f'*[Tool result]*')
+                        parts.append("*[Tool result]*")
                 else:
                     parts.append(str(block))
             content = "\n".join(parts)
@@ -107,8 +114,7 @@ def _extract_intake_transcript(project_dir: Path, session_id: str) -> None:
         transcript_path = selfo_dir / "intake-transcript.md"
         transcript_path.write_text(
             f"# Intake Interview Transcript\n\n"
-            f"*Session ID: {session_id}*\n\n---\n\n"
-            + "\n".join(lines)
+            f"*Session ID: {session_id}*\n\n---\n\n" + "\n".join(lines)
         )
 
 
@@ -124,8 +130,15 @@ def run_intake(project_dir: Path, goal_text: str) -> str:
     session_id = str(uuid.uuid4())
     print("\n--- Intake interview (chat with Claude, /exit when done) ---\n")
     proc = subprocess.run(
-        ["claude", "--session-id", session_id,
-         "--system-prompt", INTAKE_PROMPT, "--permission-mode", "acceptEdits"],
+        [
+            "claude",
+            "--session-id",
+            session_id,
+            "--system-prompt",
+            INTAKE_PROMPT,
+            "--permission-mode",
+            "acceptEdits",
+        ],
         cwd=project_dir,
         env={k: v for k, v in os.environ.items() if k != "CLAUDECODE"},
     )
@@ -160,8 +173,9 @@ def _select_one(title: str, options: list[str], default_index: int = 0) -> str:
     return options[idx]
 
 
-def _select_numeric(title: str, presets: list[str], default_index: int = 0,
-                    type_fn: type = int) -> str:
+def _select_numeric(
+    title: str, presets: list[str], default_index: int = 0, type_fn: type = int
+) -> str:
     """Arrow-key selection with a 'Custom...' option for numeric values."""
     choices = presets + ["Custom..."]
     menu = TerminalMenu(
@@ -194,15 +208,20 @@ def select_params() -> dict:
     else:
         model = _select_one("Worker model:", ["sonnet", "opus"])
     orchestrator = _select_one("Orchestrator:", ["claude-code", "api"])
-    orch_model = _select_one("Orchestrator model:", ["opus", "sonnet"])
+    orch_model = _select_one(
+        "Orchestrator model:", ["opus", "sonnet", "gemini-pro", "gemini-flash"]
+    )
     print("  Each exchange is one orchestrator turn: it thinks, delegates to an")
     print("  agent, and reads the result. More exchanges = more work per cycle.")
-    max_exchanges = _select_numeric("Max exchanges per cycle:", ["20", "30", "50"], default_index=1)
+    max_exchanges = _select_numeric(
+        "Max exchanges per cycle:", ["20", "30", "50"], default_index=1
+    )
     print("  A cycle is one full orchestrator session. If it doesn't finish,")
     print("  a new cycle starts with a summary of prior progress.")
     max_cycles = _select_numeric("Max cycles:", ["3", "5", "10"], default_index=1)
-    budget_raw = _select_numeric("Budget per step (USD):", ["None", "1.00", "5.00"],
-                                 type_fn=float)
+    budget_raw = _select_numeric(
+        "Budget per step (USD):", ["None", "1.00", "5.00"], type_fn=float
+    )
 
     budget = None if budget_raw == "None" else float(budget_raw)
 
@@ -223,24 +242,32 @@ def launch_run(project_dir: Path, goal_text: str, params: dict) -> None:
     log.emit("cli_args", **params, goal_text=goal_text)
 
     team = build_team(params["backend"], params["model"], params["budget_per_step"])
-    orchestrator = build_orchestrator(params["orchestrator"], params["orchestrator_model"])
+    orchestrator = build_orchestrator(
+        params["orchestrator"], params["orchestrator_model"]
+    )
 
     print(f"\nOrchestrator: {params['orchestrator']} ({orchestrator.model})")
     print(f"Workers: {params['backend']} ({params['model']})")
     print(f"Team: {', '.join(team.keys())}")
     print(f"Project dir: {project_dir}")
-    print(f"Max: {params['max_exchanges']} exchanges/cycle, {params['max_cycles']} cycles")
+    print(
+        f"Max: {params['max_exchanges']} exchanges/cycle, {params['max_cycles']} cycles"
+    )
     print(f"Log: {log_path}")
     print()
 
     result = orchestrator.run(
-        goal_text, project_dir, team,
+        goal_text,
+        project_dir,
+        team,
         max_exchanges=params["max_exchanges"],
         max_cycles=params["max_cycles"],
     )
 
-    print(f"\n{'='*50}")
-    print(f"Done: {len(result.cycles)} cycle(s), {result.total_exchanges} exchanges, ${result.total_cost_usd:.4f}")
+    print(f"\n{'=' * 50}")
+    print(
+        f"Done: {len(result.cycles)} cycle(s), {result.total_exchanges} exchanges, ${result.total_cost_usd:.4f}"
+    )
     if result.summary:
         print(f"  {result.summary[:300]}")
 
@@ -248,6 +275,7 @@ def launch_run(project_dir: Path, goal_text: str, params: dict) -> None:
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     try:
@@ -263,10 +291,15 @@ def _main_inner() -> None:
     parser = argparse.ArgumentParser(
         description="Interactive selfocode launcher",
     )
-    parser.add_argument("--version", action="version",
-                        version=f"selfocode {__version__}")
-    parser.add_argument("project_dir", nargs="?", default=".",
-                        help="Project directory (default: current dir)")
+    parser.add_argument(
+        "--version", action="version", version=f"selfocode {__version__}"
+    )
+    parser.add_argument(
+        "project_dir",
+        nargs="?",
+        default=".",
+        help="Project directory (default: current dir)",
+    )
     args = parser.parse_args()
 
     project_dir = Path(args.project_dir)
@@ -290,7 +323,7 @@ def _main_inner() -> None:
     params = select_params()
 
     # 4. Confirm
-    print(f"\n--- Summary ---")
+    print("\n--- Summary ---")
     print(f"  Project:      {project_dir}")
     print(f"  Goal:         {goal_text[:80]}{'...' if len(goal_text) > 80 else ''}")
     print(f"  Backend:      {params['backend']}")

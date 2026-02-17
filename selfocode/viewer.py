@@ -31,8 +31,9 @@ def open_viewer(log_path: Path | None = None) -> None:
         f.write(html)
         tmp = f.name
 
-    webbrowser.open(f"file://{tmp}")
-    print(f"Opened viewer: {tmp}")
+    url = f"file://{tmp}"
+    webbrowser.open(url)
+    print(f"Log viewer: {url}")
 
 
 def main() -> None:

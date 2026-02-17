@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 from selfocode.agent import Agent, AgentResult
-from selfocode.sessions.base import QueryResult, SessionStats
+from selfocode.sessions.base import QueryResult
 from tests.conftest import FakeSession, make_agent
 
 
@@ -109,8 +109,9 @@ class TestAgentResult:
 
     def test_format_report_with_context_reset(self) -> None:
         qr = QueryResult(text="result", elapsed_s=1.0)
-        ar = AgentResult(query=qr, context_reset=True,
-                         context_reset_reason="too many tokens")
+        ar = AgentResult(
+            query=qr, context_reset=True, context_reset_reason="too many tokens"
+        )
         report = ar.format_report()
         assert "[Context was reset: too many tokens]" in report
 

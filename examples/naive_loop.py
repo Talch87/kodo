@@ -10,7 +10,6 @@ Usage:
 
 import argparse
 import os
-import sys
 from pathlib import Path
 
 from selfocode.agent import Agent, AgentResult
@@ -90,9 +89,9 @@ def main() -> None:
     executor = Agent(session, EXECUTE_PROMPT, max_turns=30)
 
     for iteration in range(1, args.iters + 1):
-        print(f"\n{'='*50}")
+        print(f"\n{'=' * 50}")
         print(f"ITERATION {iteration}/{args.iters}")
-        print(f"{'='*50}")
+        print(f"{'=' * 50}")
 
         print("\n=== PLAN PHASE ===")
         print_result(planner.run(goal_text, project_dir))

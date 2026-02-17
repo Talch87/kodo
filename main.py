@@ -51,21 +51,44 @@ examples:
     parser.add_argument("project_dir", help="Path to project directory")
 
     # Worker options
-    parser.add_argument("--backend", choices=["claude", "cursor"], default="claude",
-                        help="Backend for worker agents (default: claude)")
-    parser.add_argument("--model", default=None,
-                        help="Model for worker agents (default: sonnet / composer-1.5)")
-    parser.add_argument("--budget-per-step", type=float, default=None,
-                        help="Max USD per agent query (claude only)")
+    parser.add_argument(
+        "--backend",
+        choices=["claude", "cursor"],
+        default="claude",
+        help="Backend for worker agents (default: claude)",
+    )
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="Model for worker agents (default: sonnet / composer-1.5)",
+    )
+    parser.add_argument(
+        "--budget-per-step",
+        type=float,
+        default=None,
+        help="Max USD per agent query (claude only)",
+    )
     # Orchestrator options
-    parser.add_argument("--orchestrator", choices=["api", "claude-code"], default="claude-code",
-                        help="Orchestrator implementation (default: claude-code)")
-    parser.add_argument("--orchestrator-model", default=None,
-                        help="Model for orchestrator (default: opus)")
-    parser.add_argument("--max-exchanges", type=int, default=30,
-                        help="Max exchanges per cycle (default: 30)")
-    parser.add_argument("--max-cycles", type=int, default=5,
-                        help="Max cycles (default: 5)")
+    parser.add_argument(
+        "--orchestrator",
+        choices=["api", "claude-code"],
+        default="claude-code",
+        help="Orchestrator implementation (default: claude-code)",
+    )
+    parser.add_argument(
+        "--orchestrator-model",
+        default=None,
+        help="Model for orchestrator (default: opus)",
+    )
+    parser.add_argument(
+        "--max-exchanges",
+        type=int,
+        default=30,
+        help="Max exchanges per cycle (default: 30)",
+    )
+    parser.add_argument(
+        "--max-cycles", type=int, default=5, help="Max cycles (default: 5)"
+    )
 
     args = parser.parse_args()
 
@@ -84,12 +107,18 @@ examples:
 
     # Initialize logging
     log_path = log.init(project_dir)
-    log.emit("cli_args", backend=args.backend, model=args.model,
-             orchestrator=args.orchestrator,
-             orchestrator_model=args.orchestrator_model,
-             max_exchanges=args.max_exchanges, max_cycles=args.max_cycles,
-             budget_per_step=args.budget_per_step,
-             goal_file=str(goal), goal_text=goal_text)
+    log.emit(
+        "cli_args",
+        backend=args.backend,
+        model=args.model,
+        orchestrator=args.orchestrator,
+        orchestrator_model=args.orchestrator_model,
+        max_exchanges=args.max_exchanges,
+        max_cycles=args.max_cycles,
+        budget_per_step=args.budget_per_step,
+        goal_file=str(goal),
+        goal_text=goal_text,
+    )
 
     team = build_team(args.backend, args.model, args.budget_per_step)
     orchestrator = build_orchestrator(args.orchestrator, args.orchestrator_model)
@@ -102,13 +131,17 @@ examples:
     print(f"Log: {log_path}")
 
     result = orchestrator.run(
-        goal_text, project_dir, team,
+        goal_text,
+        project_dir,
+        team,
         max_exchanges=args.max_exchanges,
         max_cycles=args.max_cycles,
     )
 
-    print(f"\n{'='*50}")
-    print(f"Done: {len(result.cycles)} cycle(s), {result.total_exchanges} exchanges, ${result.total_cost_usd:.4f}")
+    print(f"\n{'=' * 50}")
+    print(
+        f"Done: {len(result.cycles)} cycle(s), {result.total_exchanges} exchanges, ${result.total_cost_usd:.4f}"
+    )
     if result.summary:
         print(f"  {result.summary[:300]}")
 
