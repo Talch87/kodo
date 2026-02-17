@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Selfocode Log Viewer</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; background: #0d1117; color: #c9d1d9; min-height: 100vh; }
+
+/* Drop zone */
+#drop-zone { display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 100vh; border: 2px dashed #30363d; margin: 20px; border-radius: 12px; transition: border-color 0.2s; }
+#drop-zone.active { border-color: #58a6ff; background: rgba(88,166,255,0.05); }
+#drop-zone h2 { color: #58a6ff; margin-bottom: 8px; }
+#drop-zone p { color: #8b949e; }
+
+/* Stats bar */
+#stats-bar { display: flex; gap: 16px; flex-wrap: wrap; padding: 16px 20px; background: #161b22;
+  border-bottom: 1px solid #30363d; position: sticky; top: 0; z-index: 100; }
+.stat { display: flex; flex-direction: column; gap: 2px; }
+.stat-label { font-size: 10px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; }
+.stat-value { font-size: 14px; font-weight: 600; color: #e6edf3; }
+
+/* Timeline */
+#timeline { max-width: 900px; margin: 0 auto; padding: 20px; display: flex; flex-direction: column; gap: 8px; }
+
+/* Dividers */
+.divider { text-align: center; padding: 12px 0 4px; }
+.divider span { background: #21262d; color: #8b949e; font-size: 11px; padding: 4px 12px;
+  border-radius: 10px; border: 1px solid #30363d; }
+
+/* Header card */
+.header-card { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 16px; margin-bottom: 8px; }
+.header-card h3 { color: #58a6ff; margin-bottom: 8px; font-size: 14px; }
+.header-card pre { font-size: 11px; color: #8b949e; white-space: pre-wrap; word-break: break-all; }
+
+/* Bubbles */
+.bubble { max-width: 75%; padding: 10px 14px; border-radius: 12px; position: relative; }
+.bubble-wrap { display: flex; flex-direction: column; }
+.bubble-wrap.left { align-items: flex-start; }
+.bubble-wrap.right { align-items: flex-end; }
+
+.bubble-header { font-size: 11px; margin-bottom: 2px; padding: 0 4px; display: flex; gap: 8px; align-items: center; }
+.bubble-header .agent-name { font-weight: 600; }
+.bubble-header .time-mark { color: #8b949e; }
+
+/* Orchestrator (left) */
+.bubble-wrap.left .bubble { background: #1c1e3a; border: 1px solid #363b6b; }
+.bubble-wrap.left .agent-name { color: #d2a8ff; }
+
+/* Agent colors */
+.bubble-wrap.right .bubble { border: 1px solid #30363d; }
+.bubble-wrap.right.planner .bubble { background: #0d2137; border-color: #1f4a6e; }
+.bubble-wrap.right.planner .agent-name { color: #58a6ff; }
+.bubble-wrap.right.worker .bubble { background: #0d2d1a; border-color: #1a5e30; }
+.bubble-wrap.right.worker .agent-name { color: #3fb950; }
+.bubble-wrap.right.architect .bubble { background: #2d1d0d; border-color: #5e3a1a; }
+.bubble-wrap.right.architect .agent-name { color: #d29922; }
+/* fallback */
+.bubble-wrap.right .agent-name { color: #79c0ff; }
+
+/* Done bubble */
+.bubble-wrap.done .bubble { background: #0d2d1a; border-color: #1a5e30; }
+
+/* Content */
+.bubble-text { font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.bubble-text.collapsed { max-height: 200px; overflow: hidden; position: relative; }
+.bubble-text.collapsed::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0;
+  height: 40px; background: linear-gradient(transparent, var(--bubble-bg, #161b22)); pointer-events: none; }
+.expand-btn { font-size: 11px; color: #58a6ff; cursor: pointer; margin-top: 4px; background: none;
+  border: none; font-family: inherit; }
+.expand-btn:hover { text-decoration: underline; }
+
+/* Badges */
+.badges { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.06);
+  color: #8b949e; border: 1px solid rgba(255,255,255,0.06); }
+.badge.cost { color: #3fb950; }
+.badge.tokens { color: #d2a8ff; }
+.badge.time { color: #d29922; }
+.badge.turns { color: #58a6ff; }
+.badge.error { color: #f85149; background: rgba(248,81,73,0.1); }
+
+/* Final result */
+.result-card { background: #161b22; border: 2px solid #1f6feb; border-radius: 12px; padding: 16px; margin-top: 8px; }
+.result-card h3 { color: #58a6ff; margin-bottom: 8px; font-size: 14px; }
+.result-card .bubble-text { font-size: 13px; }
+</style>
+</head>
+<body>
+
+<div id="drop-zone">
+  <h2>Selfocode Log Viewer</h2>
+  <p>Drag &amp; drop a .jsonl log file here</p>
+</div>
+
+<div id="app" style="display:none;">
+  <div id="stats-bar"></div>
+  <div id="timeline"></div>
+</div>
+
+<script>
+// If data is pre-embedded by viewer.py, this will be set
+let EMBEDDED_DATA = null;
+/*__EMBED_MARKER__*/
+
+function formatTime(s) {
+  if (s < 60) return s.toFixed(1) + 's';
+  return Math.floor(s / 60) + 'm ' + (s % 60).toFixed(0) + 's';
+}
+function formatCost(c) { return '$' + c.toFixed(4); }
+function formatTokens(n) { return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n); }
+
+function agentRole(name) {
+  if (!name) return '';
+  const n = name.toLowerCase();
+  if (n.includes('plan')) return 'planner';
+  if (n.includes('work') || n.includes('build') || n.includes('implement')) return 'worker';
+  if (n.includes('architect') || n.includes('review')) return 'architect';
+  return '';
+}
+
+function renderStats(events) {
+  const bar = document.getElementById('stats-bar');
+  const last = events[events.length - 1];
+  const totalTime = last ? last.t : 0;
+  let totalCost = 0, exchanges = 0, agents = new Set();
+  for (const e of events) {
+    if (e.event === 'agent_run_end') {
+      totalCost += e.cost_usd || 0;
+      exchanges++;
+      agents.add(e.agent);
+    }
+    if (e.event === 'orchestrator_response') {
+      totalCost += e.cost_usd || 0;
+    }
+  }
+  const stats = [
+    ['Total Time', formatTime(totalTime)],
+    ['Total Cost', formatCost(totalCost)],
+    ['Exchanges', String(exchanges)],
+    ['Agents', Array.from(agents).join(', ') || 'n/a'],
+  ];
+  bar.innerHTML = stats.map(([l, v]) =>
+    `<div class="stat"><span class="stat-label">${l}</span><span class="stat-value">${v}</span></div>`
+  ).join('');
+}
+
+function makeBubbleText(text, bgColor) {
+  const div = document.createElement('div');
+  div.className = 'bubble-text';
+  div.textContent = text || '';
+  if (text && text.length > 600) {
+    div.classList.add('collapsed');
+    div.style.setProperty('--bubble-bg', bgColor || '#161b22');
+    const btn = document.createElement('button');
+    btn.className = 'expand-btn';
+    btn.textContent = 'Show more';
+    btn.onclick = () => {
+      const collapsed = div.classList.toggle('collapsed');
+      btn.textContent = collapsed ? 'Show more' : 'Show less';
+    };
+    const wrap = document.createElement('div');
+    wrap.appendChild(div);
+    wrap.appendChild(btn);
+    return wrap;
+  }
+  return div;
+}
+
+function renderTimeline(events) {
+  const tl = document.getElementById('timeline');
+  tl.innerHTML = '';
+
+  // Header card from run_init + cli_args + run_start
+  const init = events.find(e => e.event === 'run_init');
+  const args = events.find(e => e.event === 'cli_args');
+  const start = events.find(e => e.event === 'run_start');
+  if (init || args || start) {
+    const card = document.createElement('div');
+    card.className = 'header-card';
+    let info = '';
+    if (start) {
+      info += `Orchestrator: ${start.orchestrator || '?'}  Model: ${start.model || '?'}\n`;
+      info += `Project: ${start.project_dir || init?.project_dir || '?'}\n`;
+      info += `Max exchanges: ${start.max_exchanges || '?'}  Max cycles: ${start.max_cycles || '?'}\n`;
+      if (start.team) info += `Team: ${JSON.stringify(start.team, null, 2)}\n`;
+    }
+    if (args?.goal_text) {
+      info += `\n--- Goal ---\n${args.goal_text}`;
+    }
+    card.innerHTML = `<h3>Run Configuration</h3>`;
+    const pre = document.createElement('pre');
+    pre.textContent = info.trim();
+    card.appendChild(pre);
+    tl.appendChild(card);
+  }
+
+  let prevTime = 0;
+  for (const e of events) {
+    // Skip events handled elsewhere
+    if (['run_init', 'cli_args', 'run_start', 'agent_run_start', 'agent_query',
+         'session_query_start', 'session_query_end', 'session_reset',
+         'agent_session_reset', 'orchestrator_tool_result'].includes(e.event)) continue;
+
+    // Cycle dividers
+    if (e.event === 'run_cycle' || e.event === 'cycle_start') {
+      if (e.event === 'run_cycle') {
+        const div = document.createElement('div');
+        div.className = 'divider';
+        div.innerHTML = `<span>Cycle ${e.cycle || '?'} / ${e.max_cycles || '?'}</span>`;
+        tl.appendChild(div);
+      }
+      continue;
+    }
+
+    // Orchestrator tool call (left bubble)
+    if (e.event === 'orchestrator_tool_call') {
+      const wrap = document.createElement('div');
+      wrap.className = 'bubble-wrap left';
+      const gap = e.t - prevTime;
+      wrap.innerHTML = `<div class="bubble-header">
+        <span class="agent-name">Orchestrator</span>
+        <span class="time-mark">${formatTime(e.t)}${gap > 1 ? ' (+' + formatTime(gap) + ')' : ''}</span>
+      </div>`;
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      const taskText = `→ ${e.agent}: ${e.task || ''}`;
+      bubble.appendChild(makeBubbleText(taskText, '#1c1e3a'));
+      if (e.new_conversation) {
+        const badges = document.createElement('div');
+        badges.className = 'badges';
+        badges.innerHTML = '<span class="badge">new conversation</span>';
+        bubble.appendChild(badges);
+      }
+      wrap.appendChild(bubble);
+      tl.appendChild(wrap);
+      prevTime = e.t;
+      continue;
+    }
+
+    // Agent response (right bubble)
+    if (e.event === 'agent_run_end') {
+      const role = agentRole(e.agent);
+      const wrap = document.createElement('div');
+      wrap.className = `bubble-wrap right ${role}`;
+      wrap.innerHTML = `<div class="bubble-header">
+        <span class="agent-name">${e.agent || 'agent'}</span>
+        <span class="time-mark">${formatTime(e.t)}</span>
+      </div>`;
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      const bgMap = { planner: '#0d2137', worker: '#0d2d1a', architect: '#2d1d0d' };
+      bubble.appendChild(makeBubbleText(e.response_text || '', bgMap[role] || '#161b22'));
+      const badges = document.createElement('div');
+      badges.className = 'badges';
+      let badgeHtml = '';
+      if (e.elapsed_s) badgeHtml += `<span class="badge time">${formatTime(e.elapsed_s)}</span>`;
+      if (e.cost_usd) badgeHtml += `<span class="badge cost">${formatCost(e.cost_usd)}</span>`;
+      if (e.input_tokens || e.output_tokens)
+        badgeHtml += `<span class="badge tokens">in:${formatTokens(e.input_tokens||0)} out:${formatTokens(e.output_tokens||0)}</span>`;
+      if (e.turns) badgeHtml += `<span class="badge turns">${e.turns} turns</span>`;
+      if (e.is_error) badgeHtml += `<span class="badge error">ERROR</span>`;
+      if (e.context_reset) badgeHtml += `<span class="badge">ctx reset: ${e.context_reset_reason||'?'}</span>`;
+      badges.innerHTML = badgeHtml;
+      bubble.appendChild(badges);
+      wrap.appendChild(bubble);
+      tl.appendChild(wrap);
+      prevTime = e.t;
+      continue;
+    }
+
+    // Orchestrator done
+    if (e.event === 'orchestrator_done') {
+      const wrap = document.createElement('div');
+      wrap.className = 'bubble-wrap left done';
+      wrap.innerHTML = `<div class="bubble-header">
+        <span class="agent-name">Orchestrator</span>
+        <span class="time-mark">${formatTime(e.t)}</span>
+      </div>`;
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      bubble.appendChild(makeBubbleText(`Done: ${e.summary || ''}`, '#0d2d1a'));
+      const badges = document.createElement('div');
+      badges.className = 'badges';
+      badges.innerHTML = `<span class="badge">${e.success ? 'success' : 'failed'}</span>`;
+      bubble.appendChild(badges);
+      wrap.appendChild(bubble);
+      tl.appendChild(wrap);
+      prevTime = e.t;
+      continue;
+    }
+
+    // Final result
+    if (e.event === 'orchestrator_response') {
+      const card = document.createElement('div');
+      card.className = 'result-card';
+      card.innerHTML = `<h3>Final Result</h3>`;
+      card.appendChild(makeBubbleText(e.result_text || '', '#161b22'));
+      const badges = document.createElement('div');
+      badges.className = 'badges';
+      let bh = '';
+      if (e.cost_usd) bh += `<span class="badge cost">orchestrator ${formatCost(e.cost_usd)}</span>`;
+      if (e.num_turns) bh += `<span class="badge turns">${e.num_turns} turns</span>`;
+      if (e.is_error) bh += `<span class="badge error">ERROR</span>`;
+      badges.innerHTML = bh;
+      card.appendChild(badges);
+      tl.appendChild(card);
+      continue;
+    }
+  }
+}
+
+function loadEvents(events) {
+  document.getElementById('drop-zone').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  renderStats(events);
+  renderTimeline(events);
+}
+
+// Drag and drop
+const dz = document.getElementById('drop-zone');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('active'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('active'));
+dz.addEventListener('drop', e => {
+  e.preventDefault();
+  dz.classList.remove('active');
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const lines = ev.target.result.trim().split('\n');
+    const events = lines.map(l => JSON.parse(l));
+    document.title = 'Selfocode: ' + file.name;
+    loadEvents(events);
+  };
+  reader.readAsText(file);
+});
+
+// Also support click to select file
+dz.addEventListener('click', () => {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.jsonl';
+  input.onchange = () => {
+    const file = input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const lines = ev.target.result.trim().split('\n');
+      const events = lines.map(l => JSON.parse(l));
+      document.title = 'Selfocode: ' + file.name;
+      loadEvents(events);
+    };
+    reader.readAsText(file);
+  };
+  input.click();
+});
+
+// Auto-load embedded data
+if (EMBEDDED_DATA) loadEvents(EMBEDDED_DATA);
+</script>
+</body>
+</html>

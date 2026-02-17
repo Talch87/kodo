@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
 from selfocode.sessions.base import QueryResult, Session
+from selfocode import log
 
 
 @dataclass
@@ -51,40 +53,69 @@ class Agent:
     def __init__(
         self,
         session: Session,
-        prompt: str,
+        description: str = "",
         *,
         max_turns: int = 15,
-        max_context_tokens: int | None = None,
+        timeout_s: float | None = None,
     ):
         self.session = session
-        self.prompt = prompt
+        self.description = description  # kept for tool description extraction
         self.max_turns = max_turns
-        self.max_context_tokens = max_context_tokens
-
+        self.timeout_s = timeout_s
     def run(
         self,
         goal: str,
         project_dir: Path,
         *,
         new_conversation: bool = False,
+        agent_name: str = "",
     ) -> AgentResult:
         context_reset = False
         context_reset_reason = ""
+        label = agent_name or "agent"
+
+        log.emit("agent_run_start", agent=label, new_conversation=new_conversation,
+                 goal=goal, session_tokens=self.session.stats.total_tokens,
+                 session_queries=self.session.stats.queries)
 
         # Explicit reset requested by orchestrator
         if new_conversation:
             self.session.reset()
             context_reset = True
             context_reset_reason = "orchestrator requested new conversation"
+            log.emit("agent_session_reset", agent=label, reason=context_reset_reason)
 
-        # Auto-reset if context exceeds limit
-        elif self.max_context_tokens and self.session.stats.total_tokens >= self.max_context_tokens:
-            self.session.reset()
-            context_reset = True
-            context_reset_reason = f"auto-reset at {self.session.stats.total_tokens:,} tokens (limit: {self.max_context_tokens:,})"
+        log.emit("agent_query", agent=label, prompt=goal)
 
-        full_prompt = f"{self.prompt}\n\n# Project Goal\n\n{goal}"
-        query_result = self.session.query(full_prompt, project_dir, max_turns=self.max_turns)
+        if self.timeout_s is not None:
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(
+                    self.session.query, goal, project_dir, max_turns=self.max_turns,
+                )
+                try:
+                    query_result = future.result(timeout=self.timeout_s)
+                except TimeoutError:
+                    log.emit("agent_timeout", agent=label, timeout_s=self.timeout_s)
+                    query_result = QueryResult(
+                        text=f"Agent timed out after {self.timeout_s}s",
+                        elapsed_s=self.timeout_s,
+                        is_error=True,
+                    )
+        else:
+            query_result = self.session.query(goal, project_dir, max_turns=self.max_turns)
+
+        log.emit("agent_run_end", agent=label,
+                 elapsed_s=query_result.elapsed_s,
+                 is_error=query_result.is_error,
+                 turns=query_result.turns,
+                 input_tokens=query_result.input_tokens,
+                 output_tokens=query_result.output_tokens,
+                 cost_usd=query_result.cost_usd,
+                 response_text=query_result.text,
+                 context_reset=context_reset,
+                 context_reset_reason=context_reset_reason,
+                 session_tokens=self.session.stats.total_tokens,
+                 session_queries=self.session.stats.queries)
 
         return AgentResult(
             query=query_result,
@@ -93,3 +124,8 @@ class Agent:
             session_tokens=self.session.stats.total_tokens,
             session_queries=self.session.stats.queries,
         )
+
+    def close(self) -> None:
+        """Clean up the underlying session if it supports it."""
+        if hasattr(self.session, "close"):
+            self.session.close()
