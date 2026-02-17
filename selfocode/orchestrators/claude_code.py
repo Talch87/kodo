@@ -140,9 +140,10 @@ if the tester or architect find issues, the call is rejected and you must fix th
 class ClaudeCodeOrchestrator(OrchestratorBase):
     """Orchestrator backed by a Claude Code session with MCP tools for agents."""
 
-    def __init__(self, model: str = "opus"):
+    def __init__(self, model: str = "opus", system_prompt: str | None = None):
         self.model = model
         self._orchestrator_name = "claude_code"
+        self._system_prompt = system_prompt or ORCHESTRATOR_SYSTEM_PROMPT
         self._summarizer = Summarizer()
 
     def cycle(
@@ -175,7 +176,7 @@ class ClaudeCodeOrchestrator(OrchestratorBase):
             cwd=project_dir,
             disallowed_tools=["AskUserQuestion"],
             model=self.model,
-            system_prompt=ORCHESTRATOR_SYSTEM_PROMPT,
+            system_prompt=self._system_prompt,
             max_turns=max_exchanges,
             debug_stderr=None,
             stderr=lambda _: None,

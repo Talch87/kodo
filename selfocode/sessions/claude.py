@@ -116,7 +116,10 @@ class ClaudeSession:
 
     def _disconnect(self) -> None:
         if self._client is not None:
-            self._run(self._client.disconnect())
+            try:
+                self._run(self._client.disconnect())
+            except RuntimeError:
+                pass  # anyio cancel scope mismatch on cleanup — harmless
             self._client = None
 
     def close(self) -> None:

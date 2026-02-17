@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from selfocode import log
-from selfocode.factory import build_team, build_orchestrator
+from selfocode.factory import MODES, get_mode, build_orchestrator
 
 # Allow running from inside a Claude Code session
 os.environ.pop("CLAUDECODE", None)
@@ -34,33 +34,27 @@ def _main_inner() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 examples:
-  # Default: Opus orchestrator + Sonnet workers (all free on Max)
+  # Default: saga mode — full team (two workers, tester, architect)
   python main.py goal.md ./project
+
+  # Mission mode: single worker, orchestrator as quality gate
+  python main.py goal.md ./project --mode mission
 
   # Single cycle (one "day of work")
   python main.py goal.md ./project --max-cycles 1
 
-  # Cursor workers with Claude orchestrator
-  python main.py goal.md ./project --backend cursor --model composer-1.5
-
-  # API orchestrator (pay-per-token)
-  python main.py goal.md ./project --orchestrator api
+  # API orchestrator (pay-per-token, supports Gemini)
+  python main.py goal.md ./project --orchestrator api --orchestrator-model gemini-pro
 """,
     )
     parser.add_argument("goal", help="Path to goal .md file")
     parser.add_argument("project_dir", help="Path to project directory")
 
-    # Worker options
     parser.add_argument(
-        "--backend",
-        choices=["claude", "cursor"],
-        default="claude",
-        help="Backend for worker agents (default: claude)",
-    )
-    parser.add_argument(
-        "--model",
-        default=None,
-        help="Model for worker agents (default: sonnet / composer-1.5)",
+        "--mode",
+        choices=list(MODES.keys()),
+        default="saga",
+        help="Run mode (default: saga)",
     )
     parser.add_argument(
         "--budget-per-step",
@@ -83,17 +77,21 @@ examples:
     parser.add_argument(
         "--max-exchanges",
         type=int,
-        default=30,
-        help="Max exchanges per cycle (default: 30)",
+        default=None,
+        help="Max exchanges per cycle (default: from mode)",
     )
     parser.add_argument(
-        "--max-cycles", type=int, default=5, help="Max cycles (default: 5)"
+        "--max-cycles",
+        type=int,
+        default=None,
+        help="Max cycles (default: from mode)",
     )
 
     args = parser.parse_args()
 
-    if args.model is None:
-        args.model = "sonnet" if args.backend == "claude" else "composer-1.5"
+    mode = get_mode(args.mode)
+    max_exchanges = args.max_exchanges or mode.default_max_exchanges
+    max_cycles = args.max_cycles or mode.default_max_cycles
 
     goal = Path(args.goal)
     if not goal.exists():
@@ -109,33 +107,34 @@ examples:
     log_path = log.init(project_dir)
     log.emit(
         "cli_args",
-        backend=args.backend,
-        model=args.model,
+        mode=mode.name,
         orchestrator=args.orchestrator,
         orchestrator_model=args.orchestrator_model,
-        max_exchanges=args.max_exchanges,
-        max_cycles=args.max_cycles,
+        max_exchanges=max_exchanges,
+        max_cycles=max_cycles,
         budget_per_step=args.budget_per_step,
         goal_file=str(goal),
         goal_text=goal_text,
     )
 
-    team = build_team(args.backend, args.model, args.budget_per_step)
-    orchestrator = build_orchestrator(args.orchestrator, args.orchestrator_model)
+    team = mode.build_team(args.budget_per_step)
+    orchestrator = build_orchestrator(
+        args.orchestrator, args.orchestrator_model, system_prompt=mode.system_prompt
+    )
 
+    print(f"Mode: {mode.name} — {mode.description}")
     print(f"Orchestrator: {args.orchestrator} ({orchestrator.model})")
-    print(f"Workers: {args.backend} ({args.model})")
     print(f"Team: {', '.join(team.keys())}")
     print(f"Project dir: {project_dir}")
-    print(f"Max: {args.max_exchanges} exchanges/cycle, {args.max_cycles} cycles")
+    print(f"Max: {max_exchanges} exchanges/cycle, {max_cycles} cycles")
     print(f"Log: {log_path}")
 
     result = orchestrator.run(
         goal_text,
         project_dir,
         team,
-        max_exchanges=args.max_exchanges,
-        max_cycles=args.max_cycles,
+        max_exchanges=max_exchanges,
+        max_cycles=max_cycles,
     )
 
     print(f"\n{'=' * 50}")

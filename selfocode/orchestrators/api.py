@@ -177,10 +177,12 @@ class ApiOrchestrator(OrchestratorBase):
         self,
         model: str = "claude-opus-4-6",
         max_context_tokens: int | None = None,
+        system_prompt: str | None = None,
     ):
         self.model = model
         self._orchestrator_name = "api"
         self.max_context_tokens = max_context_tokens
+        self._system_prompt = system_prompt or ORCHESTRATOR_SYSTEM_PROMPT
         self._pydantic_model = _PYDANTIC_MODEL_MAP.get(model, model)
         self._summarizer = Summarizer()
 
@@ -217,7 +219,7 @@ class ApiOrchestrator(OrchestratorBase):
 
         agent = Agent(
             self._pydantic_model,
-            system_prompt=ORCHESTRATOR_SYSTEM_PROMPT,
+            system_prompt=self._system_prompt,
             tools=tools,
         )
 

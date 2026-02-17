@@ -15,7 +15,7 @@ load_dotenv()
 from simple_term_menu import TerminalMenu
 
 from selfocode import log
-from selfocode.factory import build_team, build_orchestrator
+from selfocode.factory import MODES, get_mode, build_orchestrator
 
 INTAKE_PROMPT = """\
 You are a project intake interviewer. The user has provided a high-level goal \
@@ -202,23 +202,30 @@ def select_params() -> dict:
     """Interactive arrow-key parameter selection. Returns config dict."""
     print("\n--- Configuration ---\n")
 
-    backend = _select_one("Backend:", ["claude", "cursor"])
-    if backend == "cursor":
-        model = _select_one("Worker model:", ["composer-1.5", "sonnet", "opus"])
-    else:
-        model = _select_one("Worker model:", ["sonnet", "opus"])
+    # Mode selection
+    mode_options = [f"{name} — {m.description}" for name, m in MODES.items()]
+    mode_choice = _select_one("Mode:", mode_options)
+    mode_name = mode_choice.split(" — ")[0]
+    mode = get_mode(mode_name)
+
     orchestrator = _select_one("Orchestrator:", ["claude-code", "api"])
     orch_model = _select_one(
         "Orchestrator model:", ["opus", "sonnet", "gemini-pro", "gemini-flash"]
     )
     print("  Each exchange is one orchestrator turn: it thinks, delegates to an")
     print("  agent, and reads the result. More exchanges = more work per cycle.")
+    exchange_presets = ["20", "30", "50"]
+    default_ex = str(mode.default_max_exchanges)
+    ex_default_idx = exchange_presets.index(default_ex) if default_ex in exchange_presets else 1
     max_exchanges = _select_numeric(
-        "Max exchanges per cycle:", ["20", "30", "50"], default_index=1
+        "Max exchanges per cycle:", exchange_presets, default_index=ex_default_idx
     )
     print("  A cycle is one full orchestrator session. If it doesn't finish,")
     print("  a new cycle starts with a summary of prior progress.")
-    max_cycles = _select_numeric("Max cycles:", ["3", "5", "10"], default_index=1)
+    cycle_presets = ["1", "3", "5", "10"]
+    default_cy = str(mode.default_max_cycles)
+    cy_default_idx = cycle_presets.index(default_cy) if default_cy in cycle_presets else 2
+    max_cycles = _select_numeric("Max cycles:", cycle_presets, default_index=cy_default_idx)
     budget_raw = _select_numeric(
         "Budget per step (USD):", ["None", "1.00", "5.00"], type_fn=float
     )
@@ -226,8 +233,7 @@ def select_params() -> dict:
     budget = None if budget_raw == "None" else float(budget_raw)
 
     return {
-        "backend": backend,
-        "model": model,
+        "mode": mode_name,
         "orchestrator": orchestrator,
         "orchestrator_model": orch_model,
         "max_exchanges": int(max_exchanges),
@@ -241,13 +247,16 @@ def launch_run(project_dir: Path, goal_text: str, params: dict) -> None:
     log_path = log.init(project_dir)
     log.emit("cli_args", **params, goal_text=goal_text)
 
-    team = build_team(params["backend"], params["model"], params["budget_per_step"])
+    mode = get_mode(params["mode"])
+    team = mode.build_team(params["budget_per_step"])
     orchestrator = build_orchestrator(
-        params["orchestrator"], params["orchestrator_model"]
+        params["orchestrator"],
+        params["orchestrator_model"],
+        system_prompt=mode.system_prompt,
     )
 
-    print(f"\nOrchestrator: {params['orchestrator']} ({orchestrator.model})")
-    print(f"Workers: {params['backend']} ({params['model']})")
+    print(f"\nMode: {mode.name} — {mode.description}")
+    print(f"Orchestrator: {params['orchestrator']} ({orchestrator.model})")
     print(f"Team: {', '.join(team.keys())}")
     print(f"Project dir: {project_dir}")
     print(
@@ -308,26 +317,38 @@ def _main_inner() -> None:
     print(f"Project directory: {project_dir}")
 
     # 1. Get goal
-    goal_text = get_goal()
+    goal_file = next(
+        (p for p in project_dir.iterdir() if p.name.lower() == "goal.md"), None
+    )
+
+    if goal_file is not None:
+        goal_text = goal_file.read_text().strip()
+        print(f"\nFound existing goal in {goal_file}:")
+        print("-" * 40)
+        print(goal_text[:500])
+        if len(goal_text) > 500:
+            print("...")
+        print("-" * 40)
+        use_existing = input("Use this goal? [Y/n] ").strip().lower()
+        if use_existing and use_existing != "y":
+            goal_text = get_goal()
+    else:
+        goal_text = get_goal()
 
     # 2. Intake interview
     skip = input("\nRefine goal with Claude? [Y/n] ").strip().lower()
     if not skip or skip == "y":
         goal_text = run_intake(project_dir, goal_text)
-    else:
-        selfo_dir = project_dir / ".selfocode"
-        selfo_dir.mkdir(parents=True, exist_ok=True)
-        (selfo_dir / "goal.md").write_text(goal_text)
 
     # 3. Select parameters
     params = select_params()
 
     # 4. Confirm
+    mode = get_mode(params["mode"])
     print("\n--- Summary ---")
     print(f"  Project:      {project_dir}")
     print(f"  Goal:         {goal_text[:80]}{'...' if len(goal_text) > 80 else ''}")
-    print(f"  Backend:      {params['backend']}")
-    print(f"  Worker model: {params['model']}")
+    print(f"  Mode:         {mode.name} — {mode.description}")
     print(f"  Orchestrator: {params['orchestrator']} ({params['orchestrator_model']})")
     print(f"  Exchanges:    {params['max_exchanges']}")
     print(f"  Cycles:       {params['max_cycles']}")
