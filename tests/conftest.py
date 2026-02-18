@@ -6,8 +6,17 @@ from pathlib import Path
 
 import pytest
 
+from selfocode import log
 from selfocode.agent import Agent
 from selfocode.sessions.base import QueryResult, SessionStats
+
+
+@pytest.fixture(autouse=True)
+def _isolate_log():
+    """Save and restore log module state to prevent cross-test pollution."""
+    saved = (log._log_file, log._run_id, log._start_time)
+    yield
+    log._log_file, log._run_id, log._start_time = saved
 
 
 class FakeSession:
