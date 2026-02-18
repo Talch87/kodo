@@ -5,8 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-from selfocode.orchestrators.base import verify_done
-from selfocode.agent import Agent
+import pytest
+
+from kodo.orchestrators.base import verify_done
+from kodo.agent import Agent
 from tests.conftest import FakeSession, make_agent
 
 
@@ -23,29 +25,20 @@ def test_all_pass(tmp_project: Path) -> None:
     assert verify_done(GOAL, SUMMARY, team, tmp_project) is None
 
 
-def test_tester_fails(tmp_project: Path) -> None:
-    """When tester finds issues, verify_done returns rejection."""
+@pytest.mark.parametrize("role,other_role,issue_label", [
+    ("tester", "architect", "tester found issues"),
+    ("architect", "tester", "Architect found issues"),
+])
+def test_single_role_fails(tmp_project: Path, role, other_role, issue_label) -> None:
+    """When one verifier finds issues, verify_done returns rejection."""
     team = {
-        "tester": make_agent("ImportError: no module named 'server'"),
-        "architect": make_agent("ALL CHECKS PASS"),
+        role: make_agent("Critical bug: SQL injection in query handler"),
+        other_role: make_agent("ALL CHECKS PASS"),
     }
     result = verify_done(GOAL, SUMMARY, team, tmp_project)
     assert result is not None
     assert "DONE REJECTED" in result
-    assert "tester found issues" in result
-    assert "ImportError" in result
-
-
-def test_architect_fails(tmp_project: Path) -> None:
-    """When architect finds issues, verify_done returns rejection."""
-    team = {
-        "tester": make_agent("ALL CHECKS PASS"),
-        "architect": make_agent("Critical bug: SQL injection in query handler"),
-    }
-    result = verify_done(GOAL, SUMMARY, team, tmp_project)
-    assert result is not None
-    assert "DONE REJECTED" in result
-    assert "Architect found issues" in result
+    assert issue_label in result
     assert "SQL injection" in result
 
 
@@ -72,19 +65,10 @@ def test_case_insensitive_pass(tmp_project: Path) -> None:
     assert verify_done(GOAL, SUMMARY, team, tmp_project) is None
 
 
-def test_no_tester_in_team(tmp_project: Path) -> None:
-    """If there's no tester, only architect runs."""
-    team = {
-        "architect": make_agent("ALL CHECKS PASS"),
-    }
-    assert verify_done(GOAL, SUMMARY, team, tmp_project) is None
-
-
-def test_no_architect_in_team(tmp_project: Path) -> None:
-    """If there's no architect, only tester runs."""
-    team = {
-        "tester": make_agent("ALL CHECKS PASS"),
-    }
+@pytest.mark.parametrize("present_role", ["tester", "architect"])
+def test_single_verifier_in_team(tmp_project: Path, present_role) -> None:
+    """If only one verifier exists, verification still works."""
+    team = {present_role: make_agent("ALL CHECKS PASS")}
     assert verify_done(GOAL, SUMMARY, team, tmp_project) is None
 
 
@@ -132,9 +116,11 @@ def test_both_testers_pass(tmp_project: Path) -> None:
 
 
 def test_empty_team(tmp_project: Path) -> None:
-    """With no verification agents, done passes (nothing to check)."""
+    """With no dedicated verifiers, worker is used as fallback verifier."""
     team = {"worker": make_agent("done")}
-    assert verify_done(GOAL, SUMMARY, team, tmp_project) is None
+    result = verify_done(GOAL, SUMMARY, team, tmp_project)
+    assert result is not None
+    assert "verifier" in result.lower()
 
 
 def test_agents_called_with_new_conversation(tmp_project: Path) -> None:
@@ -173,7 +159,7 @@ def test_report_truncated_at_3000(tmp_project: Path) -> None:
     assert len(tester_section) <= 3000
 
 
-# --- Exception handling tests (Bug 1 fix) ---
+# --- Exception handling tests ---
 
 
 class _CrashingSession(FakeSession):
@@ -181,31 +167,23 @@ class _CrashingSession(FakeSession):
         raise RuntimeError("SDK connection lost")
 
 
-def test_tester_exception_becomes_rejection(tmp_project: Path) -> None:
+@pytest.mark.parametrize("role,label", [
+    ("tester", "tester crashed"),
+    ("architect", "Architect crashed"),
+])
+def test_exception_becomes_rejection(tmp_project: Path, role, label) -> None:
     """BUG FIX: agent crash should be a rejection, not an unhandled exception."""
-    crashing_agent = Agent(_CrashingSession(), "Tester", max_turns=10)
+    other = "architect" if role == "tester" else "tester"
+    crashing_agent = Agent(_CrashingSession(), role.title(), max_turns=10)
     team = {
-        "tester": crashing_agent,
-        "architect": make_agent("ALL CHECKS PASS"),
+        role: crashing_agent,
+        other: make_agent("ALL CHECKS PASS"),
     }
     result = verify_done(GOAL, SUMMARY, team, tmp_project)
     assert result is not None
     assert "DONE REJECTED" in result
-    assert "crashed" in result
+    assert label in result
     assert "SDK connection lost" in result
-
-
-def test_architect_exception_becomes_rejection(tmp_project: Path) -> None:
-    """BUG FIX: architect crash is a rejection, not a crash."""
-    crashing_agent = Agent(_CrashingSession(), "Architect", max_turns=10)
-    team = {
-        "tester": make_agent("ALL CHECKS PASS"),
-        "architect": crashing_agent,
-    }
-    result = verify_done(GOAL, SUMMARY, team, tmp_project)
-    assert result is not None
-    assert "DONE REJECTED" in result
-    assert "Architect crashed" in result
 
 
 def test_both_crash(tmp_project: Path) -> None:

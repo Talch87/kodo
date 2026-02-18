@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
-from selfocode.agent import Agent
+from kodo.agent import Agent
 
 
 # Team is just a named dict of agents
@@ -136,7 +136,7 @@ def verify_done(
 
     Returns None if all checks pass, or a rejection message with issues found.
     """
-    from selfocode import log
+    from kodo import log
 
     issues = []
     verification_prompt = (
@@ -300,7 +300,7 @@ class OrchestratorBase:
         max_exchanges: int = 30,
         max_cycles: int = 5,
     ) -> RunResult:
-        from selfocode import log
+        from kodo import log
 
         log.emit(
             "run_start",
@@ -358,7 +358,7 @@ class OrchestratorBase:
         # Open the HTML log viewer for easy inspection
         log_file = log.get_log_file()
         if log_file and log_file.exists():
-            from selfocode.viewer import open_viewer
+            from kodo.viewer import open_viewer
 
             open_viewer(log_file)
 

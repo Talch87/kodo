@@ -1,4 +1,4 @@
-"""Tests for selfocode.sessions.claude.ClaudeSession."""
+"""Tests for kodo.sessions.claude.ClaudeSession."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from unittest.mock import patch
 
 import pytest
 
-from selfocode import log
-from selfocode.sessions.claude import ClaudeSession, _extract_tokens
+from kodo import log
+from kodo.sessions.claude import ClaudeSession, _extract_tokens
 from tests.mocks.claude_sdk import (
     MockClaudeAgentOptions,
     MockClaudeSDKClient,

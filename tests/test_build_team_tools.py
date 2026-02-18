@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from selfocode.orchestrators.base import build_team_tools
+from kodo.orchestrators.base import build_team_tools
 from tests.conftest import make_agent
 
 

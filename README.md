@@ -1,4 +1,4 @@
-# selfocode
+# kodo
 
 Experiment in explicit multi-agent orchestration on top of Claude Code and Cursor.
 
@@ -22,30 +22,33 @@ This is a research tool for exploring whether explicit team structures and persi
 ## Quick start
 
 ```bash
-# Install
-uv sync
+# Install globally (recommended)
+uv tool install git+https://github.com/ikamen/kodo
+
+# Or install from local checkout
+uv tool install .
 
 # Run with defaults: Opus orchestrator + Sonnet workers (free on Max subscription)
-.venv/bin/python main.py goal.md ./my-project
+kodo goal.md ./my-project
 
 # Single cycle ("one day of work")
-.venv/bin/python main.py goal.md ./my-project --max-cycles 1
+kodo goal.md ./my-project --max-cycles 1
 
 # Cursor workers with Claude orchestrator
-.venv/bin/python main.py goal.md ./my-project --backend cursor --model composer-1.5
+kodo goal.md ./my-project --backend cursor --model composer-1.5
 
 # API orchestrator (pay-per-token, useful outside Max subscription)
-.venv/bin/python main.py goal.md ./my-project --orchestrator api
+kodo goal.md ./my-project --orchestrator api
 
 # Limit agent context windows
-.venv/bin/python main.py goal.md ./my-project --max-context-tokens 150000
+kodo goal.md ./my-project --max-context-tokens 150000
 ```
 
 ## Architecture
 
 ```
 main.py                        CLI entry point
-selfocode/
+kodo/
   agent.py                     Agent (prompt + session → run())
   sessions/
     base.py                    Session protocol, QueryResult, SessionStats
@@ -72,9 +75,9 @@ examples/
 ## Programmatic usage
 
 ```python
-from selfocode import Agent
-from selfocode.sessions import ClaudeSession
-from selfocode.orchestrators import ClaudeCodeOrchestrator
+from kodo import Agent
+from kodo.sessions import ClaudeSession
+from kodo.orchestrators import ClaudeCodeOrchestrator
 
 session = ClaudeSession(model="sonnet")
 team = {

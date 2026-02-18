@@ -1,39 +1,13 @@
-"""Tests for selfocode.orchestrators.api.ApiOrchestrator."""
+"""Tests for kodo.orchestrators.api.ApiOrchestrator."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
-
-from selfocode import log
-from selfocode.orchestrators.api import ApiOrchestrator, _messages_to_text
-
-
-# ── helpers ──────────────────────────────────────────────────────────────
-
-@dataclass
-class FakeUsage:
-    input_tokens: int = 100
-    output_tokens: int = 50
-    requests: int = 3
-
-
-class FakeRunResult:
-    def __init__(self, output: str = "done"):
-        self.output = output
-
-    def usage(self):
-        return FakeUsage()
-
-    def all_messages(self):
-        return []
-
-
-# ── tests ────────────────────────────────────────────────────────────────
+from kodo import log
+from kodo.orchestrators.api import ApiOrchestrator, _messages_to_text
+from tests.conftest import FakeRunResult
 
 def test_cycle_done_returns_finished(tmp_path: Path):
     log.init(tmp_path, run_id="api_done")
@@ -55,8 +29,8 @@ def test_cycle_done_returns_finished(tmp_path: Path):
 
     team = _make_fake_team()
 
-    with patch("selfocode.orchestrators.api.Agent.__init__", fake_agent_init), \
-         patch("selfocode.orchestrators.api.verify_done", return_value=None):
+    with patch("kodo.orchestrators.api.Agent.__init__", fake_agent_init), \
+         patch("kodo.orchestrators.api.verify_done", return_value=None):
         orch = ApiOrchestrator(model="claude-opus-4-6")
         result = orch.cycle("build feature", tmp_path, team, max_exchanges=10)
 
@@ -75,7 +49,7 @@ def test_cycle_no_done_returns_summary(tmp_path: Path):
 
     team = _make_fake_team()
 
-    with patch("selfocode.orchestrators.api.Agent.__init__", fake_agent_init), \
+    with patch("kodo.orchestrators.api.Agent.__init__", fake_agent_init), \
          patch.object(ApiOrchestrator, "_summarize", return_value="summary of work"):
         orch = ApiOrchestrator(model="claude-opus-4-6")
         result = orch.cycle("build feature", tmp_path, team, max_exchanges=10)
@@ -95,7 +69,7 @@ def test_usage_limit_exceeded(tmp_path: Path):
 
     team = _make_fake_team()
 
-    with patch("selfocode.orchestrators.api.Agent.__init__", fake_agent_init):
+    with patch("kodo.orchestrators.api.Agent.__init__", fake_agent_init):
         orch = ApiOrchestrator(model="claude-opus-4-6")
         result = orch.cycle("build feature", tmp_path, team, max_exchanges=5)
 
@@ -119,7 +93,7 @@ def test_529_fallback(tmp_path: Path):
 
     team = _make_fake_team()
 
-    with patch("selfocode.orchestrators.api.Agent.__init__", fake_agent_init), \
+    with patch("kodo.orchestrators.api.Agent.__init__", fake_agent_init), \
          patch.object(ApiOrchestrator, "_summarize", return_value="done"):
         orch = ApiOrchestrator(
             model="claude-opus-4-6",
@@ -159,7 +133,7 @@ def test_messages_to_text():
 
 def _make_fake_team():
     """Create a minimal fake TeamConfig for orchestrator tests."""
-    from selfocode.agent import Agent
+    from kodo.agent import Agent
     from tests.conftest import FakeSession
 
     session = FakeSession(response_text="ok")

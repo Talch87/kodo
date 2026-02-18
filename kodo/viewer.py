@@ -1,7 +1,7 @@
 """Open a JSONL log file in the chat-style HTML viewer.
 
-Usage: python -m selfocode.viewer <logfile.jsonl>
-   or: python -m selfocode.viewer  (opens drag-and-drop page)
+Usage: python -m kodo.viewer <logfile.jsonl>
+   or: python -m kodo.viewer  (opens drag-and-drop page)
 """
 
 from __future__ import annotations

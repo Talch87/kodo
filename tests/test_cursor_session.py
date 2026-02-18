@@ -1,12 +1,12 @@
-"""Tests for selfocode.sessions.cursor.CursorSession."""
+"""Tests for kodo.sessions.cursor.CursorSession."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from unittest.mock import patch
 
-from selfocode import log
-from selfocode.sessions.cursor import CursorSession
+from kodo import log
+from kodo.sessions.cursor import CursorSession
 from tests.mocks.cursor_process import MockCursorProcess
 
 
@@ -21,7 +21,7 @@ def test_query_returns_result(tmp_path: Path):
     log.init(tmp_path, run_id="cursor_test")
     session = CursorSession(model="composer-1.5")
 
-    with patch("selfocode.sessions.cursor.subprocess.Popen",
+    with patch("kodo.sessions.cursor.subprocess.Popen",
                _make_popen_factory(result_text="All done!", chat_id="c1")):
         result = session.query("do stuff", tmp_path, max_turns=10)
 
@@ -34,7 +34,7 @@ def test_chat_id_captured_for_resume(tmp_path: Path):
     log.init(tmp_path, run_id="cursor_resume")
     session = CursorSession(model="composer-1.5")
 
-    with patch("selfocode.sessions.cursor.subprocess.Popen",
+    with patch("kodo.sessions.cursor.subprocess.Popen",
                _make_popen_factory(result_text="ok", chat_id="chat-xyz")):
         session.query("first", tmp_path, max_turns=10)
 
@@ -46,7 +46,7 @@ def test_chat_id_captured_for_resume(tmp_path: Path):
         calls.append(cmd)
         return original_factory(cmd, **kwargs)
 
-    with patch("selfocode.sessions.cursor.subprocess.Popen", capturing_factory):
+    with patch("kodo.sessions.cursor.subprocess.Popen", capturing_factory):
         session.query("second", tmp_path, max_turns=10)
 
     assert "--resume" in calls[0]
@@ -63,7 +63,7 @@ def test_system_prompt_prepended_once(tmp_path: Path):
         calls.append(cmd)
         return MockCursorProcess(cmd, result_text="ok", chat_id="c1", **kwargs)
 
-    with patch("selfocode.sessions.cursor.subprocess.Popen", capturing_factory):
+    with patch("kodo.sessions.cursor.subprocess.Popen", capturing_factory):
         session.query("task1", tmp_path, max_turns=10)
         session.query("task2", tmp_path, max_turns=10)
 
@@ -77,7 +77,7 @@ def test_error_on_nonzero_returncode(tmp_path: Path):
     log.init(tmp_path, run_id="cursor_error")
     session = CursorSession(model="composer-1.5")
 
-    with patch("selfocode.sessions.cursor.subprocess.Popen",
+    with patch("kodo.sessions.cursor.subprocess.Popen",
                _make_popen_factory(
                    result_text="", chat_id="c1", returncode=1,
                    stderr_text="fatal error\n")):
@@ -90,7 +90,7 @@ def test_reset_clears_state(tmp_path: Path):
     log.init(tmp_path, run_id="cursor_reset")
     session = CursorSession(model="composer-1.5")
 
-    with patch("selfocode.sessions.cursor.subprocess.Popen",
+    with patch("kodo.sessions.cursor.subprocess.Popen",
                _make_popen_factory(result_text="ok", chat_id="c1")):
         session.query("task", tmp_path, max_turns=10)
 

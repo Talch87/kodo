@@ -1,4 +1,4 @@
-"""selfocode interactive CLI — guided project setup and launch."""
+"""kodo interactive CLI — guided project setup and launch."""
 
 import argparse
 import json
@@ -14,19 +14,19 @@ load_dotenv()
 
 from simple_term_menu import TerminalMenu
 
-from selfocode import log
-from selfocode.factory import MODES, get_mode, build_orchestrator
+from kodo import log
+from kodo.factory import MODES, get_mode, build_orchestrator
 
 INTAKE_PROMPT = """\
 You are a project intake interviewer. The user has provided a high-level goal \
 for a software project. Your job is to:
 
-1. Read the goal from .selfocode/goal.md
+1. Read the goal from .kodo/goal.md
 2. Ask clarifying questions about constraints, tech choices, edge cases, \
    architecture preferences, and scope
 3. Have a natural conversation to refine the goal
 4. When you have enough clarity, write a refined, detailed goal to \
-   .selfocode/goal-refined.md
+   .kodo/goal-refined.md
 
 Keep the conversation focused and practical. When you feel the goal is \
 sufficiently clarified, write the refined goal file and tell the user \
@@ -110,7 +110,7 @@ def _extract_intake_transcript(project_dir: Path, session_id: str) -> None:
         lines.append(f"### {role}\n{content.strip()}\n")
 
     if lines:
-        selfo_dir = project_dir / ".selfocode"
+        selfo_dir = project_dir / ".kodo"
         transcript_path = selfo_dir / "intake-transcript.md"
         transcript_path.write_text(
             f"# Intake Interview Transcript\n\n"
@@ -120,7 +120,7 @@ def _extract_intake_transcript(project_dir: Path, session_id: str) -> None:
 
 def run_intake(project_dir: Path, goal_text: str) -> str:
     """Write goal.md, launch interactive Claude session for intake, read back refined goal."""
-    selfo_dir = project_dir / ".selfocode"
+    selfo_dir = project_dir / ".kodo"
     selfo_dir.mkdir(parents=True, exist_ok=True)
 
     goal_path = selfo_dir / "goal.md"
@@ -295,13 +295,13 @@ def main() -> None:
 
 
 def _main_inner() -> None:
-    from selfocode import __version__
+    from kodo import __version__
 
     parser = argparse.ArgumentParser(
-        description="Interactive selfocode launcher",
+        description="Interactive kodo launcher",
     )
     parser.add_argument(
-        "--version", action="version", version=f"selfocode {__version__}"
+        "--version", action="version", version=f"kodo {__version__}"
     )
     parser.add_argument(
         "project_dir",

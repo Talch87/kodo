@@ -5,8 +5,8 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from selfocode.agent import Agent, AgentResult
-from selfocode.sessions.base import QueryResult
+from kodo.agent import Agent, AgentResult
+from kodo.sessions.base import QueryResult
 from tests.conftest import FakeSession, make_agent
 
 

@@ -1,4 +1,4 @@
-"""Central mock package for selfocode tests."""
+"""Central mock package for kodo tests."""
 
 from tests.mocks.claude_sdk import (
     MockClaudeAgentOptions,

@@ -13,7 +13,7 @@ import urllib.request
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor
 
-from selfocode import log
+from kodo import log
 
 _PROMPT_TEMPLATE = (
     "Summarize in 1 sentence what was accomplished. "

@@ -1,5 +1,5 @@
 [project]
-name = "selfocode"
+name = "kodo"
 version = "0.4.0"
 requires-python = ">=3.10"
 dependencies = [
@@ -16,7 +16,7 @@ test = ["pytest>=7.0"]
 testpaths = ["tests"]
 
 [tool.setuptools.packages.find]
-include = ["selfocode*"]
+include = ["kodo*"]
 
 [project.scripts]
-selfocode = "selfocode.cli:main"
+kodo = "kodo.cli:main"

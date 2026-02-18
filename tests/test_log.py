@@ -1,17 +1,17 @@
-"""Tests for selfocode.log module."""
+"""Tests for kodo.log module."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from selfocode import log
+from kodo import log
 
 
 def test_init_creates_log_file(tmp_path: Path):
     log_file = log.init(tmp_path, run_id="test_run")
     assert log_file.exists()
-    assert log_file.parent == tmp_path / ".selfocode" / "logs"
+    assert log_file.parent == tmp_path / ".kodo" / "logs"
     assert log_file.name == "test_run.jsonl"
 
 

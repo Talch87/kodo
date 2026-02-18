@@ -8,8 +8,8 @@ import threading
 import time
 from pathlib import Path
 
-from selfocode import log
-from selfocode.sessions.base import QueryResult, SessionStats
+from kodo import log
+from kodo.sessions.base import QueryResult, SessionStats
 
 
 class CursorSession:

@@ -1,7 +1,7 @@
 """Structured JSONL logging for run reconstruction.
 
 Every event is a single JSON line with at least: timestamp, event, and contextual fields.
-Log file is created per run in the project directory under .selfocode/logs/.
+Log file is created per run in the project directory under .kodo/logs/.
 """
 
 from __future__ import annotations
@@ -24,12 +24,12 @@ def init(project_dir: Path, run_id: str | None = None) -> Path:
     """Initialize logging for a run. Returns the log file path."""
     global _log_file, _run_id, _start_time
 
-    from selfocode import __version__
+    from kodo import __version__
 
     _run_id = run_id or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     _start_time = time.monotonic()
 
-    log_dir = project_dir / ".selfocode" / "logs"
+    log_dir = project_dir / ".kodo" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     _log_file = log_dir / f"{_run_id}.jsonl"
 

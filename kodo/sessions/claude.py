@@ -9,8 +9,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from selfocode import log
-from selfocode.sessions.base import QueryResult, SessionStats
+from kodo import log
+from kodo.sessions.base import QueryResult, SessionStats
 
 
 def _extract_tokens(usage: dict | None) -> tuple[int | None, int | None]:

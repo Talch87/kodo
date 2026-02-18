@@ -17,9 +17,9 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.usage import UsageLimits
 
-from selfocode import log
-from selfocode.summarizer import Summarizer
-from selfocode.orchestrators.base import (
+from kodo import log
+from kodo.summarizer import Summarizer
+from kodo.orchestrators.base import (
     ORCHESTRATOR_SYSTEM_PROMPT,
     CycleResult,
     OrchestratorBase,

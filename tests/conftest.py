@@ -1,14 +1,15 @@
-"""Shared fixtures for selfocode tests."""
+"""Shared fixtures for kodo tests."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
-from selfocode import log
-from selfocode.agent import Agent
-from selfocode.sessions.base import QueryResult, SessionStats
+from kodo import log
+from kodo.agent import Agent
+from kodo.sessions.base import QueryResult, SessionStats
 
 
 @pytest.fixture(autouse=True)
@@ -60,3 +61,23 @@ def make_agent(
 def tmp_project(tmp_path: Path) -> Path:
     """Return a temporary project directory."""
     return tmp_path
+
+
+# ── Shared fakes for API orchestrator tests ─────────────────────────────
+
+@dataclass
+class FakeUsage:
+    input_tokens: int = 100
+    output_tokens: int = 50
+    requests: int = 3
+
+
+class FakeRunResult:
+    def __init__(self, output: str = "done"):
+        self.output = output
+
+    def usage(self):
+        return FakeUsage()
+
+    def all_messages(self):
+        return []

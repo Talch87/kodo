@@ -1,4 +1,4 @@
-"""Example: naive plan-execute loop using selfocode primitives.
+"""Example: naive plan-execute loop using kodo primitives.
 
 This was the original approach before the orchestrated mode.
 Kept as a simple example of using Agent + Session directly.
@@ -12,9 +12,9 @@ import argparse
 import os
 from pathlib import Path
 
-from selfocode.agent import Agent, AgentResult
-from selfocode.sessions.claude import ClaudeSession
-from selfocode.sessions.cursor import CursorSession
+from kodo.agent import Agent, AgentResult
+from kodo.sessions.claude import ClaudeSession
+from kodo.sessions.cursor import CursorSession
 
 os.environ.pop("CLAUDECODE", None)
 

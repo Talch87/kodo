@@ -8,14 +8,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from selfocode import (
+from kodo import (
     TESTER_PROMPT,
     TESTER_BROWSER_PROMPT,
     ARCHITECT_PROMPT,
     make_session,
 )
-from selfocode.agent import Agent
-from selfocode.orchestrators.base import ORCHESTRATOR_SYSTEM_PROMPT, TeamConfig
+from kodo.agent import Agent
+from kodo.orchestrators.base import ORCHESTRATOR_SYSTEM_PROMPT, TeamConfig
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +260,7 @@ def build_orchestrator(
     *fallback_model* is used when the primary model returns 529.
     """
     if name == "api":
-        from selfocode.orchestrators.api import ApiOrchestrator
+        from kodo.orchestrators.api import ApiOrchestrator
 
         orch_model = _MODEL_ALIASES.get(model, model) if model else "claude-opus-4-6"
         fb_model = (
@@ -270,7 +270,7 @@ def build_orchestrator(
             model=orch_model, system_prompt=system_prompt, fallback_model=fb_model,
         )
 
-    from selfocode.orchestrators.claude_code import ClaudeCodeOrchestrator
+    from kodo.orchestrators.claude_code import ClaudeCodeOrchestrator
 
     orch_model = model or "opus"
     return ClaudeCodeOrchestrator(model=orch_model, system_prompt=system_prompt)

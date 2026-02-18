@@ -1,11 +1,11 @@
-"""selfocode — autonomous goal-driven coding agent."""
+"""kodo — autonomous goal-driven coding agent."""
 
 __version__ = "0.4.0"
 
-from selfocode import log
-from selfocode.agent import Agent, AgentResult
-from selfocode.sessions.base import QueryResult, Session, SessionStats
-from selfocode.orchestrators.base import (
+from kodo import log
+from kodo.agent import Agent, AgentResult
+from kodo.sessions.base import QueryResult, Session, SessionStats
+from kodo.orchestrators.base import (
     CycleResult,
     Orchestrator,
     RunResult,
@@ -50,8 +50,8 @@ def make_session(
     through the Claude.ai subscription, not the API.  Set True only when you
     explicitly want API billing for this session.
     """
-    from selfocode.sessions.claude import ClaudeSession
-    from selfocode.sessions.cursor import CursorSession
+    from kodo.sessions.claude import ClaudeSession
+    from kodo.sessions.cursor import CursorSession
 
     if backend == "cursor":
         return CursorSession(model=model, system_prompt=system_prompt)

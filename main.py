@@ -1,4 +1,4 @@
-"""selfocode — orchestrated multi-agent coding CLI."""
+"""kodo — orchestrated multi-agent coding CLI."""
 
 import argparse
 import os
@@ -9,8 +9,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from selfocode import log
-from selfocode.factory import MODES, get_mode, build_orchestrator
+from kodo import log
+from kodo.factory import MODES, get_mode, build_orchestrator
 
 # Allow running from inside a Claude Code session
 os.environ.pop("CLAUDECODE", None)
