@@ -40,15 +40,28 @@ def make_session(
     budget: float | None,
     system_prompt: str | None = None,
     chrome: bool = False,
+    fallback_model: str | None = None,
+    use_api_key: bool = False,
 ) -> Session:
-    """Create a worker session for the given backend."""
+    """Create a worker session for the given backend.
+
+    *use_api_key*: when False (default), ANTHROPIC_API_KEY is stripped from the
+    environment before spawning the Claude SDK client so the session bills
+    through the Claude.ai subscription, not the API.  Set True only when you
+    explicitly want API billing for this session.
+    """
     from selfocode.sessions.claude import ClaudeSession
     from selfocode.sessions.cursor import CursorSession
 
     if backend == "cursor":
         return CursorSession(model=model, system_prompt=system_prompt)
     return ClaudeSession(
-        model=model, max_budget_usd=budget, system_prompt=system_prompt, chrome=chrome
+        model=model,
+        max_budget_usd=budget,
+        system_prompt=system_prompt,
+        chrome=chrome,
+        fallback_model=fallback_model,
+        use_api_key=use_api_key,
     )
 
 

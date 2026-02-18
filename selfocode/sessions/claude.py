@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import threading
 import time
 from pathlib import Path
@@ -28,11 +29,15 @@ class ClaudeSession:
         max_budget_usd: float | None = None,
         system_prompt: str | None = None,
         chrome: bool = False,
+        fallback_model: str | None = None,
+        use_api_key: bool = False,
     ):
         self.model = model
         self.max_budget_usd = max_budget_usd
         self.system_prompt = system_prompt
         self.chrome = chrome
+        self.fallback_model = fallback_model
+        self.use_api_key = use_api_key
         self._client = None
         self._project_dir: Path | None = None
         self._stats = SessionStats()
@@ -99,20 +104,35 @@ class ClaudeSession:
         if self.chrome:
             extra_args["--chrome"] = None
 
+        # The SDK always starts with os.environ, so we must remove CLAUDECODE
+        # from the actual environment to prevent nested-session detection.
+        os.environ.pop("CLAUDECODE", None)
+
+        # Unless explicitly opted in, strip ANTHROPIC_API_KEY so the SDK
+        # session uses the Claude.ai subscription instead of API billing.
+        saved_api_key = None
+        if not self.use_api_key and "ANTHROPIC_API_KEY" in os.environ:
+            saved_api_key = os.environ.pop("ANTHROPIC_API_KEY")
+
         options = ClaudeAgentOptions(
             permission_mode="bypassPermissions",
             cwd=project_dir,
             disallowed_tools=["AskUserQuestion"],
             model=self.model,
+            fallback_model=self.fallback_model,
             max_budget_usd=self.max_budget_usd,
             extra_args=extra_args,
             debug_stderr=None,
-            stderr=lambda _: None,
+            stderr=lambda msg: log.emit("claude_stderr", message=msg),
             can_use_tool=self._can_use_tool,
             **({"system_prompt": self.system_prompt} if self.system_prompt else {}),
         )
         self._client = ClaudeSDKClient(options=options)
         self._run(self._client.connect())
+
+        # Restore the key so the orchestrator's own API calls still work.
+        if saved_api_key is not None:
+            os.environ["ANTHROPIC_API_KEY"] = saved_api_key
 
     def _disconnect(self) -> None:
         if self._client is not None:

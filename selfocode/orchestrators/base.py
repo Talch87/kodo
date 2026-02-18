@@ -198,6 +198,42 @@ def verify_done(
             log.emit("done_verification_error", agent="architect", error=str(exc))
             issues.append(f"**Architect crashed:** {exc}")
 
+    # Fallback: if no dedicated verifiers exist, use a worker in a fresh session
+    has_dedicated_verifiers = bool(tester_agents) or architect_agent is not None
+    if not has_dedicated_verifiers:
+        # Prefer worker_smart, fall back to any worker
+        verifier = team.get("worker_smart") or team.get("worker") or next(
+            (a for a in team.values()), None
+        )
+        if verifier:
+            verifier_name = next(
+                (n for n, a in team.items() if a is verifier), "worker"
+            )
+            try:
+                log.tprint(f"[done] running {verifier_name} as verifier (fresh session)...")
+                verify_result = verifier.run(
+                    verification_prompt
+                    + "You are reviewing work done by another agent. "
+                    "In a FRESH context, review the codebase changes against the goal. "
+                    "Check: does it solve the goal? Is the code correct? Did anything break? "
+                    "Run tests if available. Report ONLY issues found. "
+                    "If everything looks good, say 'ALL CHECKS PASS'.",
+                    project_dir,
+                    new_conversation=True,
+                    agent_name=f"{verifier_name}_verification",
+                )
+                verify_report = verify_result.text or ""
+                log.emit(
+                    "done_verification", agent=verifier_name, report=verify_report[:5000]
+                )
+                if "ALL CHECKS PASS" not in verify_report.upper():
+                    issues.append(
+                        f"**{verifier_name} (verifier) found issues:**\n{verify_report[:3000]}"
+                    )
+            except Exception as exc:
+                log.emit("done_verification_error", agent=verifier_name, error=str(exc))
+                issues.append(f"**{verifier_name} (verifier) crashed:** {exc}")
+
     if issues:
         return (
             "DONE REJECTED — verification found issues that must be fixed:\n\n"

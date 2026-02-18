@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import time
+
 from pydantic_ai import Agent, Tool
-from pydantic_ai.exceptions import UsageLimitExceeded
+from pydantic_ai.exceptions import ModelHTTPError, UsageLimitExceeded
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
@@ -76,12 +78,18 @@ def _build_tools(
                     new_conversation=new_conversation,
                 )
 
-                agent_result = agent_obj.run(
-                    task,
-                    project_dir,
-                    new_conversation=new_conversation,
-                    agent_name=agent_name,
-                )
+                try:
+                    agent_result = agent_obj.run(
+                        task,
+                        project_dir,
+                        new_conversation=new_conversation,
+                        agent_name=agent_name,
+                    )
+                except Exception as exc:
+                    error_msg = f"[ERROR] {agent_name} crashed: {type(exc).__name__}: {exc}"
+                    log.emit("agent_crash", agent=agent_name, error=str(exc))
+                    log.tprint(error_msg)
+                    return error_msg
 
                 report = agent_result.format_report()[:10000]
                 log.emit(
@@ -178,12 +186,19 @@ class ApiOrchestrator(OrchestratorBase):
         model: str = "claude-opus-4-6",
         max_context_tokens: int | None = None,
         system_prompt: str | None = None,
+        fallback_model: str | None = None,
     ):
         self.model = model
         self._orchestrator_name = "api"
         self.max_context_tokens = max_context_tokens
         self._system_prompt = system_prompt or ORCHESTRATOR_SYSTEM_PROMPT
         self._pydantic_model = _PYDANTIC_MODEL_MAP.get(model, model)
+        self._fallback_model = fallback_model
+        self._fallback_pydantic = (
+            _PYDANTIC_MODEL_MAP.get(fallback_model, fallback_model)
+            if fallback_model
+            else None
+        )
         self._summarizer = Summarizer()
 
     def cycle(
@@ -225,16 +240,36 @@ class ApiOrchestrator(OrchestratorBase):
 
         log.tprint(f"\n[orchestrator] starting cycle (max {max_exchanges} requests)...")
 
-        try:
-            run_result = agent.run_sync(
-                prompt,
-                usage_limits=UsageLimits(request_limit=max_exchanges),
-            )
-        except UsageLimitExceeded:
-            log.tprint(f"[orchestrator] request limit reached ({max_exchanges})")
-            # Even on limit, we can still get partial usage from the exception context.
-            # Fall through to done_signal check below.
-            run_result = None
+        max_retries = 3
+        run_result = None
+        for attempt in range(max_retries):
+            try:
+                run_result = agent.run_sync(
+                    prompt,
+                    usage_limits=UsageLimits(request_limit=max_exchanges),
+                )
+                break
+            except UsageLimitExceeded:
+                log.tprint(f"[orchestrator] request limit reached ({max_exchanges})")
+                break
+            except ModelHTTPError as exc:
+                if exc.status_code != 529:
+                    raise
+                if self._fallback_pydantic and attempt == 0:
+                    log.tprint(f"[orchestrator] 529 on {self.model}, falling back to {self._fallback_model}")
+                    log.emit("orchestrator_fallback", primary=self.model, fallback=self._fallback_model)
+                    agent = Agent(
+                        self._fallback_pydantic,
+                        system_prompt=self._system_prompt,
+                        tools=tools,
+                    )
+                elif attempt < max_retries - 1:
+                    wait = 30 * (attempt + 1)
+                    log.tprint(f"[orchestrator] 529 overloaded, retrying in {wait}s...")
+                    log.emit("orchestrator_retry", status_code=529, attempt=attempt + 1, wait_s=wait)
+                    time.sleep(wait)
+                else:
+                    raise
 
         if run_result is not None:
             usage = run_result.usage()

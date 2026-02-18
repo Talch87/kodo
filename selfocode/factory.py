@@ -47,7 +47,9 @@ def _build_team_saga(
 ) -> TeamConfig:
     """Create the standard team with two workers (fast + smart) and support agents."""
     worker_fast_session = make_session("cursor", "composer-1.5", budget)
-    worker_smart_session = make_session("claude", "opus", budget)
+    worker_smart_session = make_session(
+        "claude", "opus", None, fallback_model="sonnet"
+    )
     tester_session = make_session(
         "cursor", "composer-1.5", budget, system_prompt=TESTER_PROMPT
     )
@@ -59,7 +61,8 @@ def _build_team_saga(
         chrome=True,
     )
     architect_session = make_session(
-        "claude", "opus", budget, system_prompt=ARCHITECT_PROMPT
+        "claude", "opus", None,
+        system_prompt=ARCHITECT_PROMPT, fallback_model="sonnet",
     )
 
     return {
@@ -137,7 +140,9 @@ def _build_team_saga(
 def _build_team_mission(budget: float | None = None) -> TeamConfig:
     """Create a two-worker team (fast + smart) for the mission mode."""
     worker_fast_session = make_session("cursor", "composer-1.5", budget)
-    worker_smart_session = make_session("claude", "opus", budget)
+    worker_smart_session = make_session(
+        "claude", "opus", None, fallback_model="sonnet",
+    )
     return {
         "worker_fast": Agent(
             worker_fast_session,
@@ -246,17 +251,24 @@ def build_orchestrator(
     name: str,
     model: str | None = None,
     system_prompt: str | None = None,
+    fallback_model: str | None = None,
 ):
     """Construct an orchestrator by name ('api' or 'claude-code').
 
     *model* can be a short alias ("opus") or a full model ID.
     *system_prompt* is forwarded to the orchestrator; defaults to the base prompt.
+    *fallback_model* is used when the primary model returns 529.
     """
     if name == "api":
         from selfocode.orchestrators.api import ApiOrchestrator
 
         orch_model = _MODEL_ALIASES.get(model, model) if model else "claude-opus-4-6"
-        return ApiOrchestrator(model=orch_model, system_prompt=system_prompt)
+        fb_model = (
+            _MODEL_ALIASES.get(fallback_model, fallback_model) if fallback_model else None
+        )
+        return ApiOrchestrator(
+            model=orch_model, system_prompt=system_prompt, fallback_model=fb_model,
+        )
 
     from selfocode.orchestrators.claude_code import ClaudeCodeOrchestrator
 
