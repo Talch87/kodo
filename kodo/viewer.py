@@ -23,6 +23,8 @@ def open_viewer(log_path: Path | None = None) -> None:
         lines = log_path.read_text().strip().splitlines()
         events = [json.loads(line) for line in lines]
         embed = f"EMBEDDED_DATA = {json.dumps(events)};"
+        # Escape </script> so HTML parser doesn't close the script tag early
+        embed = embed.replace("</script>", "<\\/script>")
         html = template.replace(_EMBED_MARKER, embed)
     else:
         html = template

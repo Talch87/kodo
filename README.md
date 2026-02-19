@@ -119,7 +119,7 @@ kodo                     # run in current directory
 kodo ./my-project        # run in specific directory
 
 # Non-interactive (for scripting)
-python -m kodo.main goal.md ./my-project --mode saga --max-cycles 3
+python -m kodo goal.md ./my-project --mode saga --max-cycles 3
 
 # Resume an interrupted run (looks in project's .kodo/logs/)
 kodo --resume                       # resume latest incomplete run in current dir

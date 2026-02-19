@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Selfocode Log Viewer</title>
+<title>kodo Log Viewer</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; background: #0d1117; color: #c9d1d9; min-height: 100vh; }
@@ -91,7 +91,7 @@ body { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; background: #
 <body>
 
 <div id="drop-zone">
-  <h2>Selfocode Log Viewer</h2>
+  <h2>kodo Log Viewer</h2>
   <p>Drag &amp; drop a .jsonl log file here</p>
 </div>
 
@@ -344,7 +344,7 @@ dz.addEventListener('drop', e => {
   reader.onload = ev => {
     const lines = ev.target.result.trim().split('\n');
     const events = lines.map(l => JSON.parse(l));
-    document.title = 'Selfocode: ' + file.name;
+    document.title = 'kodo: ' + file.name;
     loadEvents(events);
   };
   reader.readAsText(file);
@@ -362,7 +362,7 @@ dz.addEventListener('click', () => {
     reader.onload = ev => {
       const lines = ev.target.result.trim().split('\n');
       const events = lines.map(l => JSON.parse(l));
-      document.title = 'Selfocode: ' + file.name;
+      document.title = 'kodo: ' + file.name;
       loadEvents(events);
     };
     reader.readAsText(file);
@@ -371,7 +371,16 @@ dz.addEventListener('click', () => {
 });
 
 // Auto-load embedded data
-if (EMBEDDED_DATA) loadEvents(EMBEDDED_DATA);
+if (EMBEDDED_DATA) {
+  try {
+    loadEvents(EMBEDDED_DATA);
+  } catch (err) {
+    document.getElementById('drop-zone').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    document.getElementById('stats-bar').innerHTML = '<div class="stat"><span class="stat-label">Error</span><span class="stat-value" style="color:#f85149">' + String(err).replace(/</g, '&lt;') + '</span></div>';
+    document.getElementById('timeline').innerHTML = '<div class="header-card"><h3>Parse Error</h3><pre>' + String(err).replace(/</g, '&lt;') + '</pre></div>';
+  }
+}
 </script>
 </body>
 </html>
