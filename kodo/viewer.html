@@ -126,19 +126,30 @@ function renderStats(events) {
   const last = events[events.length - 1];
   const totalTime = last ? last.t : 0;
   let totalCost = 0, exchanges = 0, agents = new Set();
+  let apiCost = 0, subCost = 0;
   for (const e of events) {
     if (e.event === 'agent_run_end') {
-      totalCost += e.cost_usd || 0;
+      const c = e.cost_usd || 0;
+      totalCost += c;
       exchanges++;
       agents.add(e.agent);
+      if (e.cost_bucket === 'api') apiCost += c;
+      else subCost += c;
     }
     if (e.event === 'orchestrator_response') {
       totalCost += e.cost_usd || 0;
+    }
+    if (e.event === 'cycle_end') {
+      const c = e.cost_usd || 0;
+      if (e.cost_bucket === 'api') apiCost += c;
+      else subCost += c;
     }
   }
   const stats = [
     ['Total Time', formatTime(totalTime)],
     ['Total Cost', formatCost(totalCost)],
+    ['API Cost', formatCost(apiCost)],
+    ['Subscription', formatCost(subCost)],
     ['Exchanges', String(exchanges)],
     ['Agents', Array.from(agents).join(', ') || 'n/a'],
   ];
@@ -261,6 +272,7 @@ function renderTimeline(events) {
       if (e.input_tokens || e.output_tokens)
         badgeHtml += `<span class="badge tokens">in:${formatTokens(e.input_tokens||0)} out:${formatTokens(e.output_tokens||0)}</span>`;
       if (e.turns) badgeHtml += `<span class="badge turns">${e.turns} turns</span>`;
+      if (e.cost_bucket) badgeHtml += `<span class="badge">${e.cost_bucket.replace('_', ' ')}</span>`;
       if (e.is_error) badgeHtml += `<span class="badge error">ERROR</span>`;
       if (e.context_reset) badgeHtml += `<span class="badge">ctx reset: ${e.context_reset_reason||'?'}</span>`;
       badges.innerHTML = badgeHtml;

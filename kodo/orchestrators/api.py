@@ -16,6 +16,7 @@ from pydantic_ai.messages import (
     ToolReturnPart,
 )
 from pydantic_ai.usage import UsageLimits
+from pydantic_ai_summarization import create_summarization_processor
 
 from kodo import log
 from kodo.summarizer import Summarizer
@@ -24,6 +25,7 @@ from kodo.orchestrators.base import (
     CycleResult,
     OrchestratorBase,
     TeamConfig,
+    VerificationState,
     verify_done,
 )
 
@@ -59,6 +61,7 @@ def _build_tools(
     summarizer: Summarizer,
     done_signal: _DoneSignal,
     goal: str,
+    verification_state: VerificationState | None = None,
 ) -> list[Tool]:
     """Build pydantic-ai Tool objects for each team agent + the done tool."""
     tools: list[Tool] = []
@@ -113,6 +116,8 @@ def _build_tools(
                         f"[{agent_name}] context reset: {agent_result.context_reset_reason}"
                     )
 
+                log.print_stats_table()
+
                 summarizer.summarize(agent_name, task, report)
                 return report
 
@@ -140,7 +145,7 @@ def _build_tools(
             done_signal.success = False
             return "Acknowledged (marked as unsuccessful)."
 
-        rejection = verify_done(goal, summary, team, project_dir)
+        rejection = verify_done(goal, summary, team, project_dir, state=verification_state)
         if rejection:
             log.emit("orchestrator_done_rejected", rejection=rejection[:5000])
             log.tprint("[done] REJECTED — verification found issues")
@@ -184,7 +189,7 @@ class ApiOrchestrator(OrchestratorBase):
     def __init__(
         self,
         model: str = "claude-opus-4-6",
-        max_context_tokens: int | None = None,
+        max_context_tokens: int | None = 100_000,
         system_prompt: str | None = None,
         fallback_model: str | None = None,
     ):
@@ -211,7 +216,8 @@ class ApiOrchestrator(OrchestratorBase):
         prior_summary: str = "",
     ) -> CycleResult:
         done_signal = _DoneSignal()
-        tools = _build_tools(team, project_dir, self._summarizer, done_signal, goal)
+        verification_state = VerificationState()
+        tools = _build_tools(team, project_dir, self._summarizer, done_signal, goal, verification_state)
         result = CycleResult()
 
         prompt = f"# Goal\n\n{goal}\n\nProject directory: {project_dir}"
@@ -232,10 +238,21 @@ class ApiOrchestrator(OrchestratorBase):
             prior_summary=prior_summary or None,
         )
 
+        history_processors = []
+        if self.max_context_tokens:
+            history_processors.append(
+                create_summarization_processor(
+                    trigger=("tokens", self.max_context_tokens),
+                    keep=("tokens", self.max_context_tokens // 2),
+                    model=self._pydantic_model,
+                )
+            )
+
         agent = Agent(
             self._pydantic_model,
             system_prompt=self._system_prompt,
             tools=tools,
+            history_processors=history_processors or None,
         )
 
         log.tprint(f"\n[orchestrator] starting cycle (max {max_exchanges} requests)...")
@@ -262,6 +279,7 @@ class ApiOrchestrator(OrchestratorBase):
                         self._fallback_pydantic,
                         system_prompt=self._system_prompt,
                         tools=tools,
+                        history_processors=history_processors or None,
                     )
                 elif attempt < max_retries - 1:
                     wait = 30 * (attempt + 1)
@@ -278,6 +296,7 @@ class ApiOrchestrator(OrchestratorBase):
                 usage.input_tokens * price_in + usage.output_tokens * price_out
             ) / 1_000_000
             result.exchanges = usage.requests
+            log.get_run_stats().record_orchestrator(result.total_cost_usd, "api")
 
         if done_signal.called:
             result.finished = True
@@ -290,6 +309,7 @@ class ApiOrchestrator(OrchestratorBase):
                 finished=True,
                 summary=result.summary,
                 cost_usd=result.total_cost_usd,
+                cost_bucket="api",
             )
         else:
             # Model stopped without calling done — summarize for next cycle.
@@ -311,6 +331,7 @@ class ApiOrchestrator(OrchestratorBase):
                 finished=False,
                 summary=result.summary,
                 cost_usd=result.total_cost_usd,
+                cost_bucket="api",
             )
 
         return result

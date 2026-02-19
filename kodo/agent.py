@@ -118,6 +118,7 @@ class Agent:
                 goal, project_dir, max_turns=self.max_turns
             )
 
+        bucket = self.session.cost_bucket
         log.emit(
             "agent_run_end",
             agent=label,
@@ -127,11 +128,22 @@ class Agent:
             input_tokens=query_result.input_tokens,
             output_tokens=query_result.output_tokens,
             cost_usd=query_result.cost_usd,
+            cost_bucket=bucket,
             response_text=query_result.text,
             context_reset=context_reset,
             context_reset_reason=context_reset_reason,
             session_tokens=self.session.stats.total_tokens,
             session_queries=self.session.stats.queries,
+        )
+
+        log.get_run_stats().record_agent(
+            agent=label,
+            cost_usd=query_result.cost_usd or 0,
+            input_tokens=query_result.input_tokens or 0,
+            output_tokens=query_result.output_tokens or 0,
+            elapsed_s=query_result.elapsed_s or 0,
+            is_error=query_result.is_error,
+            cost_bucket=bucket,
         )
 
         return AgentResult(

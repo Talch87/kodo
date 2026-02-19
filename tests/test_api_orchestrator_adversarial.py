@@ -29,7 +29,7 @@ def test_done_with_success_false(tmp_path: Path):
 
     agent_tools = []
 
-    def fake_agent_init(self, model, *, system_prompt=None, tools=None):
+    def fake_agent_init(self, model, *, system_prompt=None, tools=None, **kwargs):
         nonlocal agent_tools
         agent_tools = tools or []
         self.run_sync = fake_run_sync
@@ -76,7 +76,7 @@ def test_agent_crash_returns_error_string(tmp_path: Path):
 
     agent_tools = []
 
-    def fake_agent_init(self, model, *, system_prompt=None, tools=None):
+    def fake_agent_init(self, model, *, system_prompt=None, tools=None, **kwargs):
         nonlocal agent_tools
         agent_tools = tools or []
         self.run_sync = fake_run_sync
@@ -152,7 +152,7 @@ def test_cost_calculation_with_unknown_model(tmp_path: Path):
 
     agent_tools = []
 
-    def fake_agent_init(self, model, *, system_prompt=None, tools=None):
+    def fake_agent_init(self, model, *, system_prompt=None, tools=None, **kwargs):
         nonlocal agent_tools
         agent_tools = tools or []
         self.run_sync = fake_run_sync

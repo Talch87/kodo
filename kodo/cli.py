@@ -14,8 +14,14 @@ load_dotenv()
 
 from simple_term_menu import TerminalMenu
 
-from kodo import log
-from kodo.factory import MODES, get_mode, build_orchestrator
+from kodo import log, __version__
+from kodo.factory import MODES, get_mode, build_orchestrator, has_claude, has_cursor
+from kodo.orchestrators.base import ResumeState
+
+
+def _print_banner() -> None:
+    print(f"\n  kodo v{__version__} — autonomous multi-agent coding")
+    print(f"  https://github.com/ikamen/kodo\n")
 
 INTAKE_PROMPT = """\
 You are a project intake interviewer. The user has provided a high-level goal \
@@ -202,30 +208,61 @@ def select_params() -> dict:
     """Interactive arrow-key parameter selection. Returns config dict."""
     print("\n--- Configuration ---\n")
 
+    # Show available backends
+    _claude = has_claude()
+    _cursor = has_cursor()
+    if not _claude and not _cursor:
+        print("Error: no worker backends found.")
+        print("  Install at least one of:")
+        print("    Claude Code CLI  — https://docs.anthropic.com/en/docs/claude-code")
+        print("    Cursor CLI       — https://docs.cursor.com/agent")
+        sys.exit(1)
+    parts = []
+    parts.append(f"Claude Code: {'yes' if _claude else 'not found'}")
+    parts.append(f"Cursor: {'yes' if _cursor else 'not found'}")
+    print(f"  Backends: {' | '.join(parts)}\n")
+
     # Mode selection
     mode_options = [f"{name} — {m.description}" for name, m in MODES.items()]
     mode_choice = _select_one("Mode:", mode_options)
     mode_name = mode_choice.split(" — ")[0]
     mode = get_mode(mode_name)
 
-    orchestrator = _select_one("Orchestrator:", ["claude-code", "api"])
     orch_model = _select_one(
         "Orchestrator model:", ["opus", "sonnet", "gemini-pro", "gemini-flash"]
     )
-    print("  Each exchange is one orchestrator turn: it thinks, delegates to an")
-    print("  agent, and reads the result. More exchanges = more work per cycle.")
+    if orch_model.startswith("gemini"):
+        orchestrator = "api"
+    elif not has_claude():
+        # claude-code orchestrator requires the claude CLI
+        orchestrator = "api"
+        print("  (Using API orchestrator — Claude Code CLI not found)")
+    else:
+        orchestrator = _select_one(
+            "Orchestrator:",
+            [
+                "claude-code (free on Max subscription)",
+                "api (pay-per-token)",
+            ],
+        ).split(" (")[0]
+
+    print("\n  An exchange = one orchestrator turn: think, delegate to agent, read result.")
     exchange_presets = ["20", "30", "50"]
     default_ex = str(mode.default_max_exchanges)
     ex_default_idx = exchange_presets.index(default_ex) if default_ex in exchange_presets else 1
     max_exchanges = _select_numeric(
         "Max exchanges per cycle:", exchange_presets, default_index=ex_default_idx
     )
-    print("  A cycle is one full orchestrator session. If it doesn't finish,")
+
+    print("\n  A cycle = one full orchestrator session. If it doesn't finish,")
     print("  a new cycle starts with a summary of prior progress.")
     cycle_presets = ["1", "3", "5", "10"]
     default_cy = str(mode.default_max_cycles)
     cy_default_idx = cycle_presets.index(default_cy) if default_cy in cycle_presets else 2
     max_cycles = _select_numeric("Max cycles:", cycle_presets, default_index=cy_default_idx)
+
+    print("\n  Budget per step limits spending on each agent call.")
+    print("  Only matters for API-billed sessions; ignored on subscription.")
     budget_raw = _select_numeric(
         "Budget per step (USD):", ["None", "1.00", "5.00"], type_fn=float
     )
@@ -240,6 +277,40 @@ def select_params() -> dict:
         "max_cycles": int(max_cycles),
         "budget_per_step": budget,
     }
+
+
+def _config_path(project_dir: Path) -> Path:
+    return project_dir / ".kodo" / "last-config.json"
+
+
+def _save_config(project_dir: Path, params: dict) -> None:
+    path = _config_path(project_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(params, indent=2))
+
+
+def _load_or_select_params(project_dir: Path) -> dict:
+    """Offer to reuse previous config, or run interactive selection."""
+    cfg_path = _config_path(project_dir)
+    if cfg_path.exists():
+        try:
+            prev = json.loads(cfg_path.read_text())
+            mode = get_mode(prev["mode"])
+            print(f"\n  Previous config found:")
+            print(f"    Mode:         {mode.name} — {mode.description}")
+            print(f"    Orchestrator: {prev['orchestrator']} ({prev['orchestrator_model']})")
+            print(f"    Exchanges:    {prev['max_exchanges']}/cycle, {prev['max_cycles']} cycles")
+            if prev.get("budget_per_step"):
+                print(f"    Budget/step:  ${prev['budget_per_step']:.2f}")
+            reuse = input("\n  Reuse this config? [Y/n] ").strip().lower()
+            if not reuse or reuse == "y":
+                return prev
+        except (json.JSONDecodeError, KeyError):
+            pass  # corrupt config, fall through to interactive
+
+    params = select_params()
+    _save_config(project_dir, params)
+    return params
 
 
 def launch_run(project_dir: Path, goal_text: str, params: dict) -> None:
@@ -281,6 +352,63 @@ def launch_run(project_dir: Path, goal_text: str, params: dict) -> None:
         print(f"  {result.summary[:300]}")
 
 
+def launch_resume(project_dir: Path, state: log.RunState) -> None:
+    """Resume an interrupted run from its parsed RunState."""
+    log.init_append(state.log_file)
+
+    # Reconstruct params from RunState
+    params = {
+        "mode": state.mode or "saga",
+        "orchestrator": "api" if state.orchestrator == "api" else "claude-code",
+        "orchestrator_model": state.model,
+        "max_exchanges": state.max_exchanges,
+        "max_cycles": state.max_cycles,
+        "budget_per_step": state.budget_per_step,
+    }
+
+    mode = get_mode(params["mode"])
+    team = mode.build_team(params["budget_per_step"])
+    orchestrator = build_orchestrator(
+        params["orchestrator"],
+        params["orchestrator_model"],
+        system_prompt=mode.system_prompt,
+    )
+
+    resume = ResumeState(
+        completed_cycles=state.completed_cycles,
+        prior_summary=state.last_summary,
+        agent_session_ids=state.agent_session_ids,
+    )
+
+    print(f"\nResuming run: {state.run_id}")
+    print(f"Mode: {mode.name} — {mode.description}")
+    print(f"Orchestrator: {params['orchestrator']} ({orchestrator.model})")
+    print(f"Team: {', '.join(team.keys())}")
+    print(f"Completed cycles: {state.completed_cycles}/{state.max_cycles}")
+    if state.agent_session_ids:
+        print(f"Resuming sessions: {', '.join(state.agent_session_ids.keys())}")
+    print(f"Log: {state.log_file}")
+    print()
+
+    result = orchestrator.run(
+        state.goal,
+        Path(state.project_dir),
+        team,
+        max_exchanges=params["max_exchanges"],
+        max_cycles=params["max_cycles"],
+        resume=resume,
+    )
+
+    total_cycles = state.completed_cycles + len(result.cycles)
+    print(f"\n{'=' * 50}")
+    print(
+        f"Done: {total_cycles} total cycle(s), {result.total_exchanges} exchanges (this session), "
+        f"${result.total_cost_usd:.4f}"
+    )
+    if result.summary:
+        print(f"  {result.summary[:300]}")
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -295,13 +423,19 @@ def main() -> None:
 
 
 def _main_inner() -> None:
-    from kodo import __version__
-
     parser = argparse.ArgumentParser(
-        description="Interactive kodo launcher",
+        description="kodo — autonomous multi-agent coding",
     )
     parser.add_argument(
         "--version", action="version", version=f"kodo {__version__}"
+    )
+    parser.add_argument(
+        "--resume",
+        nargs="?",
+        const="__latest__",
+        default=None,
+        metavar="RUN_ID",
+        help="Resume an interrupted run. No value = latest incomplete run.",
     )
     parser.add_argument(
         "project_dir",
@@ -311,10 +445,40 @@ def _main_inner() -> None:
     )
     args = parser.parse_args()
 
+    _print_banner()
+
     project_dir = Path(args.project_dir)
     project_dir.mkdir(parents=True, exist_ok=True)
     project_dir = project_dir.resolve()
-    print(f"Project directory: {project_dir}")
+    print(f"  Project: {project_dir}")
+
+    # Handle --resume
+    if args.resume is not None:
+        if args.resume == "__latest__":
+            runs = log.find_incomplete_runs(project_dir)
+            if not runs:
+                print("No incomplete runs found.")
+                sys.exit(1)
+            state = runs[0]
+        else:
+            log_file = project_dir / ".kodo" / "logs" / f"{args.resume}.jsonl"
+            if not log_file.exists():
+                print(f"Log file not found: {log_file}")
+                sys.exit(1)
+            state = log.parse_run(log_file)
+            if state is None:
+                print(f"Could not parse run from {log_file}")
+                sys.exit(1)
+
+        print(f"  Goal: {state.goal[:80]}{'...' if len(state.goal) > 80 else ''}")
+        print(f"  Cycles completed: {state.completed_cycles}/{state.max_cycles}")
+        confirm = input("\nResume this run? [Y/n] ").strip().lower()
+        if confirm and confirm != "y":
+            print("Aborted.")
+            sys.exit(0)
+
+        launch_resume(project_dir, state)
+        return
 
     # 1. Get goal
     goal_file = next(
@@ -335,24 +499,35 @@ def _main_inner() -> None:
     else:
         goal_text = get_goal()
 
-    # 2. Intake interview
-    skip = input("\nRefine goal with Claude? [Y/n] ").strip().lower()
-    if not skip or skip == "y":
-        goal_text = run_intake(project_dir, goal_text)
+    # 2. Intake interview (requires Claude Code CLI)
+    if has_claude():
+        skip = input("\nRefine goal with Claude? [Y/n] ").strip().lower()
+        if not skip or skip == "y":
+            goal_text = run_intake(project_dir, goal_text)
+    else:
+        print("\nSkipping intake interview (Claude Code CLI not found).")
 
-    # 3. Select parameters
-    params = select_params()
+    # 3. Select parameters (or reuse previous config)
+    params = _load_or_select_params(project_dir)
 
     # 4. Confirm
     mode = get_mode(params["mode"])
-    print("\n--- Summary ---")
+    print("\n" + "=" * 60)
+    print("  READY TO LAUNCH")
+    print("=" * 60)
     print(f"  Project:      {project_dir}")
     print(f"  Goal:         {goal_text[:80]}{'...' if len(goal_text) > 80 else ''}")
     print(f"  Mode:         {mode.name} — {mode.description}")
     print(f"  Orchestrator: {params['orchestrator']} ({params['orchestrator_model']})")
-    print(f"  Exchanges:    {params['max_exchanges']}")
-    print(f"  Cycles:       {params['max_cycles']}")
-    print(f"  Budget/step:  {params['budget_per_step']}")
+    print(f"  Exchanges:    {params['max_exchanges']}/cycle, {params['max_cycles']} cycles")
+    if params["budget_per_step"]:
+        print(f"  Budget/step:  ${params['budget_per_step']:.2f}")
+    print()
+    print("  WARNING: Agents run with full permissions (bypass mode).")
+    print("  They will create, modify, and delete files — primarily in")
+    print(f"  {project_dir}")
+    print("  but they CAN access any file on your system (install deps,")
+    print("  edit configs, etc). Make sure you have a git commit or backup.")
     print()
 
     confirm = input("Proceed? [Y/n] ").strip().lower()

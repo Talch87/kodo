@@ -8,6 +8,7 @@ from kodo.sessions.base import QueryResult, Session, SessionStats
 from kodo.orchestrators.base import (
     CycleResult,
     Orchestrator,
+    ResumeState,
     RunResult,
     TeamConfig,
 )
@@ -17,21 +18,25 @@ from kodo.orchestrators.base import (
 # ---------------------------------------------------------------------------
 
 TESTER_PROMPT = """\
-You are a tester agent. You receive a description of the desired user experience \
-and verify it works end-to-end. Figure out yourself how to test — run the app, \
-call APIs, check files exist, verify imports, run scripts. Report what works \
-and what's broken with specific error messages. Don't fix anything — just report."""
+You are a tester agent. Verify the desired user experience works end-to-end — \
+run the app, call APIs, check files, verify imports, run scripts.
+Fix minor issues (style, formatting) yourself. Only report blocking issues \
+(crashes, failing tests, missing features) with specific error messages.
+Say 'ALL CHECKS PASS' if clean, 'MINOR ISSUES FIXED' if you only fixed cosmetics."""
 
 TESTER_BROWSER_PROMPT = """\
-You are a tester agent with browser access. You receive a description of the \
-desired user experience and verify it works by opening the app in a real browser. \
-Navigate the UI, click buttons, fill forms, check that pages render correctly. \
-Report what works and what's broken with specific error messages and screenshots \
-if helpful. Don't fix anything — just report."""
+You are a tester agent with browser access. Verify the app works by opening it \
+in a real browser — navigate the UI, click buttons, fill forms, check rendering.
+Fix minor issues (style, formatting) yourself. Only report blocking issues \
+(broken functionality, crashes, missing features) with specific error messages.
+Say 'ALL CHECKS PASS' if clean, 'MINOR ISSUES FIXED' if you only fixed cosmetics."""
 
 ARCHITECT_PROMPT = """\
-You are a code reviewer. Read the codebase, identify bugs and structural issues, \
-and provide a brief actionable critique with specific file/line references."""
+You are a code reviewer. Read the codebase, identify bugs and structural issues \
+with specific file/line references.
+Fix minor issues (style, naming) yourself. Only report blocking issues \
+(bugs, missing features, broken tests, deviations from goal).
+Say 'ALL CHECKS PASS' if clean, 'MINOR ISSUES FIXED' if you only fixed cosmetics."""
 
 
 def make_session(
@@ -73,6 +78,7 @@ __all__ = [
     "Session",
     "SessionStats",
     "CycleResult",
+    "ResumeState",
     "RunResult",
     "Orchestrator",
     "TeamConfig",

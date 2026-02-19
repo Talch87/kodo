@@ -12,6 +12,9 @@ from typing import Any
 from kodo import log
 from kodo.sessions.base import QueryResult, SessionStats
 
+# Guards os.environ mutations in _ensure_client across concurrent sessions.
+_env_lock = threading.Lock()
+
 
 def _extract_tokens(usage: dict | None) -> tuple[int | None, int | None]:
     """Pull input/output token counts from the raw usage dict."""
@@ -31,6 +34,7 @@ class ClaudeSession:
         chrome: bool = False,
         fallback_model: str | None = None,
         use_api_key: bool = False,
+        resume_session_id: str | None = None,
     ):
         self.model = model
         self.max_budget_usd = max_budget_usd
@@ -38,8 +42,10 @@ class ClaudeSession:
         self.chrome = chrome
         self.fallback_model = fallback_model
         self.use_api_key = use_api_key
+        self.resume_session_id = resume_session_id
         self._client = None
         self._project_dir: Path | None = None
+        self._session_id: str | None = None
         self._stats = SessionStats()
         # Plan-mode review state: when a worker calls ExitPlanMode, we capture
         # the plan and interrupt so the orchestrator can review it.  On the
@@ -91,6 +97,14 @@ class ClaudeSession:
     def stats(self) -> SessionStats:
         return self._stats
 
+    @property
+    def cost_bucket(self) -> str:
+        return "api" if self.use_api_key else "claude_subscription"
+
+    @property
+    def session_id(self) -> str | None:
+        return self._session_id
+
     def _ensure_client(self, project_dir: Path) -> None:
         from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 
@@ -104,35 +118,41 @@ class ClaudeSession:
         if self.chrome:
             extra_args["--chrome"] = None
 
-        # The SDK always starts with os.environ, so we must remove CLAUDECODE
-        # from the actual environment to prevent nested-session detection.
-        os.environ.pop("CLAUDECODE", None)
+        with _env_lock:
+            # The SDK always starts with os.environ, so we must remove CLAUDECODE
+            # from the actual environment to prevent nested-session detection.
+            os.environ.pop("CLAUDECODE", None)
 
-        # Unless explicitly opted in, strip ANTHROPIC_API_KEY so the SDK
-        # session uses the Claude.ai subscription instead of API billing.
-        saved_api_key = None
-        if not self.use_api_key and "ANTHROPIC_API_KEY" in os.environ:
-            saved_api_key = os.environ.pop("ANTHROPIC_API_KEY")
+            # Unless explicitly opted in, strip ANTHROPIC_API_KEY so the SDK
+            # session uses the Claude.ai subscription instead of API billing.
+            saved_api_key = None
+            if not self.use_api_key and "ANTHROPIC_API_KEY" in os.environ:
+                saved_api_key = os.environ.pop("ANTHROPIC_API_KEY")
 
-        options = ClaudeAgentOptions(
-            permission_mode="bypassPermissions",
-            cwd=project_dir,
-            disallowed_tools=["AskUserQuestion"],
-            model=self.model,
-            fallback_model=self.fallback_model,
-            max_budget_usd=self.max_budget_usd,
-            extra_args=extra_args,
-            debug_stderr=None,
-            stderr=lambda msg: log.emit("claude_stderr", message=msg),
-            can_use_tool=self._can_use_tool,
-            **({"system_prompt": self.system_prompt} if self.system_prompt else {}),
-        )
-        self._client = ClaudeSDKClient(options=options)
-        self._run(self._client.connect())
+            resume_id = self.resume_session_id
+            if resume_id:
+                self.resume_session_id = None  # one-shot: first connect resumes
 
-        # Restore the key so the orchestrator's own API calls still work.
-        if saved_api_key is not None:
-            os.environ["ANTHROPIC_API_KEY"] = saved_api_key
+            options = ClaudeAgentOptions(
+                permission_mode="bypassPermissions",
+                cwd=project_dir,
+                disallowed_tools=["AskUserQuestion"],
+                model=self.model,
+                fallback_model=self.fallback_model,
+                max_budget_usd=self.max_budget_usd,
+                extra_args=extra_args,
+                debug_stderr=None,
+                stderr=lambda msg: log.emit("claude_stderr", message=msg),
+                can_use_tool=self._can_use_tool,
+                **({"resume": resume_id} if resume_id else {}),
+                **({"system_prompt": self.system_prompt} if self.system_prompt else {}),
+            )
+            self._client = ClaudeSDKClient(options=options)
+            self._run(self._client.connect())
+
+            # Restore the key so the orchestrator's own API calls still work.
+            if saved_api_key is not None:
+                os.environ["ANTHROPIC_API_KEY"] = saved_api_key
 
     def _disconnect(self) -> None:
         if self._client is not None:
@@ -201,6 +221,8 @@ class ClaudeSession:
                         output_tokens=out,
                         usage_raw=message.usage,
                     )
+                    if hasattr(message, "session_id") and message.session_id:
+                        self._session_id = message.session_id
                     self._stats.queries += 1
                     self._stats.total_input_tokens += inp or 0
                     self._stats.total_output_tokens += out or 0
@@ -235,5 +257,6 @@ class ClaudeSession:
             output_tokens=result.output_tokens,
             response_text=result.text,
             usage_raw=result.usage_raw,
+            session_id=self._session_id,
         )
         return result

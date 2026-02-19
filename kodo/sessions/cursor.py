@@ -13,16 +13,29 @@ from kodo.sessions.base import QueryResult, SessionStats
 
 
 class CursorSession:
-    def __init__(self, model: str = "composer-1.5", system_prompt: str | None = None):
+    def __init__(
+        self,
+        model: str = "composer-1.5",
+        system_prompt: str | None = None,
+        resume_chat_id: str | None = None,
+    ):
         self.model = model
         self.system_prompt = system_prompt
         self._stats = SessionStats()
-        self._chat_id: str | None = None
+        self._chat_id: str | None = resume_chat_id
         self._system_prompt_sent = False
 
     @property
     def stats(self) -> SessionStats:
         return self._stats
+
+    @property
+    def cost_bucket(self) -> str:
+        return "cursor_subscription"
+
+    @property
+    def session_id(self) -> str | None:
+        return self._chat_id
 
     def reset(self) -> None:
         log.emit(

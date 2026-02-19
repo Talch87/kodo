@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from kodo.orchestrators.base import verify_done
+from kodo.orchestrators.base import VerificationState, verify_done
 from kodo.agent import Agent
 from tests.conftest import FakeSession, make_agent
 
@@ -195,3 +195,56 @@ def test_both_crash(tmp_project: Path) -> None:
     result = verify_done(GOAL, SUMMARY, team, tmp_project)
     assert result is not None
     assert result.count("crashed") == 2
+
+
+# --- VerificationState tests ---
+
+
+def test_minor_issues_fixed_accepted(tmp_project: Path) -> None:
+    """When verifiers say MINOR ISSUES FIXED, verify_done accepts (returns None)."""
+    team = {
+        "tester": make_agent("I fixed some formatting. MINOR ISSUES FIXED"),
+        "architect": make_agent("Renamed a variable. MINOR ISSUES FIXED"),
+    }
+    assert verify_done(GOAL, SUMMARY, team, tmp_project) is None
+
+
+def test_minor_issues_fixed_case_insensitive(tmp_project: Path) -> None:
+    """MINOR ISSUES FIXED matching is case-insensitive."""
+    team = {
+        "tester": make_agent("minor issues fixed"),
+        "architect": make_agent("Minor Issues Fixed"),
+    }
+    assert verify_done(GOAL, SUMMARY, team, tmp_project) is None
+
+
+def test_second_attempt_keeps_session(tmp_project: Path) -> None:
+    """Second done() call does not reset verifier sessions (reuses context)."""
+    tester = make_agent("ALL CHECKS PASS")
+    architect = make_agent("ALL CHECKS PASS")
+    team = {"tester": tester, "architect": architect}
+    state = VerificationState()
+
+    # First call — resets sessions
+    verify_done(GOAL, SUMMARY, team, tmp_project, state=state)
+    assert tester.session.reset_count == 1
+    assert architect.session.reset_count == 1
+
+    # Second call — should NOT reset (persistent context)
+    verify_done(GOAL, SUMMARY, team, tmp_project, state=state)
+    assert tester.session.reset_count == 1  # still 1, not 2
+    assert architect.session.reset_count == 1
+
+
+def test_attempt_count_in_rejection(tmp_project: Path) -> None:
+    """Rejection message includes the attempt number."""
+    team = {"tester": make_agent("Something is broken")}
+    state = VerificationState()
+
+    result1 = verify_done(GOAL, SUMMARY, team, tmp_project, state=state)
+    assert result1 is not None
+    assert "attempt 1" in result1
+
+    result2 = verify_done(GOAL, SUMMARY, team, tmp_project, state=state)
+    assert result2 is not None
+    assert "attempt 2" in result2

@@ -129,14 +129,44 @@ def build_team_tools(team: TeamConfig) -> list[dict]:
     return tools
 
 
+@dataclass
+class VerificationState:
+    """Tracks verification attempts within a single cycle.
+
+    Created fresh each ``cycle()`` call. First ``done()`` resets verifier
+    sessions for a clean baseline; subsequent calls reuse the session so
+    verifiers have persistent context from prior reviews.
+    """
+
+    done_attempt: int = 0
+
+
+def _check_passed(report: str) -> bool:
+    """Return True if a verifier report signals acceptance."""
+    upper = report.upper()
+    return "ALL CHECKS PASS" in upper or "MINOR ISSUES FIXED" in upper
+
+
 def verify_done(
-    goal: str, summary: str, team: TeamConfig, project_dir: Path
+    goal: str,
+    summary: str,
+    team: TeamConfig,
+    project_dir: Path,
+    *,
+    state: VerificationState | None = None,
 ) -> str | None:
     """Run tester + architect to verify the goal is met.
 
     Returns None if all checks pass, or a rejection message with issues found.
     """
     from kodo import log
+
+    if state is None:
+        state = VerificationState()
+
+    state.done_attempt += 1
+    attempt = state.done_attempt
+    reset_session = attempt == 1
 
     issues = []
     verification_prompt = (
@@ -154,20 +184,20 @@ def verify_done(
 
     for tester_name, tester_agent in tester_agents:
         try:
-            log.tprint(f"[done] running {tester_name} verification...")
+            log.tprint(f"[done] running {tester_name} verification (attempt {attempt})...")
             tester_result = tester_agent.run(
                 verification_prompt
                 + "Verify this works end-to-end. Report ONLY issues found. "
                 "If everything works, say 'ALL CHECKS PASS'.",
                 project_dir,
-                new_conversation=True,
+                new_conversation=reset_session,
                 agent_name=f"{tester_name}_verification",
             )
             tester_report = tester_result.text or ""
             log.emit(
                 "done_verification", agent=tester_name, report=tester_report[:5000]
             )
-            if "ALL CHECKS PASS" not in tester_report.upper():
+            if not _check_passed(tester_report):
                 issues.append(
                     f"**{tester_name} found issues:**\n{tester_report[:3000]}"
                 )
@@ -178,21 +208,21 @@ def verify_done(
     architect_agent = team.get("architect")
     if architect_agent:
         try:
-            log.tprint("[done] running architect verification...")
+            log.tprint(f"[done] running architect verification (attempt {attempt})...")
             architect_result = architect_agent.run(
                 verification_prompt
                 + "Review the codebase for critical bugs, missing features, "
                 "or deviations from the goal. Report ONLY issues found. "
                 "If everything looks good, say 'ALL CHECKS PASS'.",
                 project_dir,
-                new_conversation=True,
+                new_conversation=reset_session,
                 agent_name="architect_verification",
             )
             architect_report = architect_result.text or ""
             log.emit(
                 "done_verification", agent="architect", report=architect_report[:5000]
             )
-            if "ALL CHECKS PASS" not in architect_report.upper():
+            if not _check_passed(architect_report):
                 issues.append(f"**Architect found issues:**\n{architect_report[:3000]}")
         except Exception as exc:
             log.emit("done_verification_error", agent="architect", error=str(exc))
@@ -226,7 +256,7 @@ def verify_done(
                 log.emit(
                     "done_verification", agent=verifier_name, report=verify_report[:5000]
                 )
-                if "ALL CHECKS PASS" not in verify_report.upper():
+                if not _check_passed(verify_report):
                     issues.append(
                         f"**{verifier_name} (verifier) found issues:**\n{verify_report[:3000]}"
                     )
@@ -236,11 +266,20 @@ def verify_done(
 
     if issues:
         return (
-            "DONE REJECTED — verification found issues that must be fixed:\n\n"
+            f"DONE REJECTED (attempt {attempt}) — verification found issues that must be fixed:\n\n"
             + "\n\n".join(issues)
             + "\n\nFix these issues and try calling done again."
         )
     return None
+
+
+@dataclass
+class ResumeState:
+    """State for resuming a previously interrupted run."""
+
+    completed_cycles: int
+    prior_summary: str
+    agent_session_ids: dict[str, str] = field(default_factory=dict)
 
 
 class Orchestrator(Protocol):
@@ -264,6 +303,7 @@ class Orchestrator(Protocol):
         *,
         max_exchanges: int = 30,
         max_cycles: int = 5,
+        resume: ResumeState | None = None,
     ) -> RunResult:
         """Run multiple cycles until done or limit reached."""
         ...
@@ -299,8 +339,26 @@ class OrchestratorBase:
         *,
         max_exchanges: int = 30,
         max_cycles: int = 5,
+        resume: ResumeState | None = None,
     ) -> RunResult:
         from kodo import log
+        from kodo.sessions.claude import ClaudeSession
+        from kodo.sessions.cursor import CursorSession
+
+        # Inject resume session IDs into agents before starting
+        if resume:
+            for agent_name, sid in resume.agent_session_ids.items():
+                agent = team.get(agent_name)
+                if agent is None:
+                    continue
+                sess = agent.session
+                if isinstance(sess, ClaudeSession):
+                    sess.resume_session_id = sid
+                elif isinstance(sess, CursorSession):
+                    sess._chat_id = sid
+
+        start_cycle = (resume.completed_cycles if resume else 0) + 1
+        prior_summary = resume.prior_summary if resume else ""
 
         log.emit(
             "run_start",
@@ -311,55 +369,58 @@ class OrchestratorBase:
             max_exchanges=max_exchanges,
             max_cycles=max_cycles,
             team=list(team.keys()),
+            resumed=resume is not None,
+            resume_from_cycle=start_cycle if resume else None,
         )
         result = RunResult()
-        prior_summary = ""
 
-        for i in range(1, max_cycles + 1):
-            if i > 1:
-                log.tprint(f"\n[orchestrator] === CYCLE {i}/{max_cycles} ===")
+        try:
+            for i in range(start_cycle, max_cycles + 1):
+                if i > 1:
+                    log.tprint(f"\n[orchestrator] === CYCLE {i}/{max_cycles} ===")
+                log.emit(
+                    "run_cycle",
+                    orchestrator=self._orchestrator_name,
+                    cycle=i,
+                    max_cycles=max_cycles,
+                )
+
+                cycle_result = self.cycle(
+                    goal,
+                    project_dir,
+                    team,
+                    max_exchanges=max_exchanges,
+                    prior_summary=prior_summary,
+                )
+                result.cycles.append(cycle_result)
+
+                if cycle_result.finished:
+                    break
+
+                prior_summary = cycle_result.summary
+        finally:
+            self._summarizer.shutdown()
+
+            # Clean up agent sessions
+            for agent in team.values():
+                agent.close()
+
             log.emit(
-                "run_cycle",
+                "run_end",
                 orchestrator=self._orchestrator_name,
-                cycle=i,
-                max_cycles=max_cycles,
+                total_cycles=len(result.cycles),
+                finished=result.finished,
+                total_cost_usd=result.total_cost_usd,
+                total_exchanges=result.total_exchanges,
+                summary=result.summary,
             )
+            log.print_stats_table(final=True)
 
-            cycle_result = self.cycle(
-                goal,
-                project_dir,
-                team,
-                max_exchanges=max_exchanges,
-                prior_summary=prior_summary,
-            )
-            result.cycles.append(cycle_result)
+            # Open the HTML log viewer for easy inspection
+            log_file = log.get_log_file()
+            if log_file and log_file.exists():
+                from kodo.viewer import open_viewer
 
-            if cycle_result.finished:
-                break
-
-            prior_summary = cycle_result.summary
-
-        self._summarizer.shutdown()
-
-        # Clean up agent sessions
-        for agent in team.values():
-            agent.close()
-
-        log.emit(
-            "run_end",
-            orchestrator=self._orchestrator_name,
-            total_cycles=len(result.cycles),
-            finished=result.finished,
-            total_cost_usd=result.total_cost_usd,
-            total_exchanges=result.total_exchanges,
-            summary=result.summary,
-        )
-
-        # Open the HTML log viewer for easy inspection
-        log_file = log.get_log_file()
-        if log_file and log_file.exists():
-            from kodo.viewer import open_viewer
-
-            open_viewer(log_file)
+                open_viewer(log_file)
 
         return result

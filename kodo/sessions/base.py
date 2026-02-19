@@ -37,6 +37,16 @@ class Session(Protocol):
     @property
     def stats(self) -> SessionStats: ...
 
+    @property
+    def cost_bucket(self) -> str:
+        """Billing bucket: 'api', 'claude_subscription', or 'cursor_subscription'."""
+        ...
+
+    @property
+    def session_id(self) -> str | None:
+        """Backend session ID for resume support. None if not yet established."""
+        return None
+
     def query(
         self, prompt: str, project_dir: Path, *, max_turns: int
     ) -> QueryResult: ...

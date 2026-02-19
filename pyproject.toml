@@ -3,10 +3,12 @@ name = "kodo"
 version = "0.4.0"
 requires-python = ">=3.10"
 dependencies = [
-    "claude-agent-sdk",
+    "claude-agent-sdk>=0.1.36",
+    "mcp>=1.0",
     "python-dotenv>=1.0",
-    "simple-term-menu",
-    "pydantic-ai[anthropic,google]",
+    "simple-term-menu>=1.6",
+    "pydantic-ai>=1.0",
+    "summarization-pydantic-ai>=0.0.3",
 ]
 
 [project.optional-dependencies]
@@ -17,6 +19,9 @@ testpaths = ["tests"]
 
 [tool.setuptools.packages.find]
 include = ["kodo*"]
+
+[tool.setuptools.package-data]
+kodo = ["*.html"]
 
 [project.scripts]
 kodo = "kodo.cli:main"

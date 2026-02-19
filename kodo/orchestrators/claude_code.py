@@ -13,6 +13,7 @@ from kodo.orchestrators.base import (
     CycleResult,
     OrchestratorBase,
     TeamConfig,
+    VerificationState,
     verify_done,
 )
 
@@ -32,6 +33,7 @@ def _build_mcp_server(
     summarizer: Summarizer,
     done_signal: _DoneSignal,
     goal: str,
+    verification_state: VerificationState | None = None,
 ):
     """Build a FastMCP server exposing each team agent as a tool."""
     from mcp.server.fastmcp import FastMCP
@@ -55,12 +57,18 @@ def _build_mcp_server(
                 if new_conversation:
                     log.tprint(f"[{agent_name}] new conversation requested")
 
-                result = agent_obj.run(
-                    task,
-                    project_dir,
-                    new_conversation=new_conversation,
-                    agent_name=agent_name,
-                )
+                try:
+                    result = agent_obj.run(
+                        task,
+                        project_dir,
+                        new_conversation=new_conversation,
+                        agent_name=agent_name,
+                    )
+                except Exception as exc:
+                    error_msg = f"[ERROR] {agent_name} crashed: {type(exc).__name__}: {exc}"
+                    log.emit("agent_crash", agent=agent_name, error=str(exc))
+                    log.tprint(error_msg)
+                    return error_msg
 
                 report = result.format_report()[:10000]
                 log.emit(
@@ -83,6 +91,8 @@ def _build_mcp_server(
                     log.tprint(
                         f"[{agent_name}] context reset: {result.context_reset_reason}"
                     )
+
+                log.print_stats_table()
 
                 summarizer.summarize(agent_name, task, report)
                 return report
@@ -114,7 +124,7 @@ if the tester or architect find issues, the call is rejected and you must fix th
             done_signal.success = False
             return "Acknowledged (marked as unsuccessful)."
 
-        rejection = verify_done(goal, summary, team, project_dir)
+        rejection = verify_done(goal, summary, team, project_dir, state=verification_state)
         if rejection:
             log.emit(
                 "orchestrator_done_rejected",
@@ -169,7 +179,8 @@ class ClaudeCodeOrchestrator(OrchestratorBase):
         )
 
         done_signal = _DoneSignal()
-        mcp = _build_mcp_server(team, project_dir, self._summarizer, done_signal, goal)
+        verification_state = VerificationState()
+        mcp = _build_mcp_server(team, project_dir, self._summarizer, done_signal, goal, verification_state)
 
         options = ClaudeAgentOptions(
             permission_mode="bypassPermissions",
@@ -209,6 +220,9 @@ class ClaudeCodeOrchestrator(OrchestratorBase):
                     if isinstance(message, ResultMessage):
                         result.exchanges = message.num_turns or 0
                         result.total_cost_usd = message.total_cost_usd or 0.0
+                        log.get_run_stats().record_orchestrator(
+                            result.total_cost_usd, "claude_subscription"
+                        )
                         result.finished = done_signal.called
                         result.success = done_signal.success
                         result.summary = (
@@ -275,6 +289,7 @@ class ClaudeCodeOrchestrator(OrchestratorBase):
             finished=result.finished,
             summary=result.summary,
             cost_usd=result.total_cost_usd,
+            cost_bucket="claude_subscription",
         )
         self._summarizer.clear()
         return result

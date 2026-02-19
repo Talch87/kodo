@@ -22,7 +22,7 @@ def test_cycle_done_returns_finished(tmp_path: Path):
 
     agent_tools = []
 
-    def fake_agent_init(self, model, *, system_prompt=None, tools=None):
+    def fake_agent_init(self, model, *, system_prompt=None, tools=None, **kwargs):
         nonlocal agent_tools
         agent_tools = tools or []
         self.run_sync = fake_run_sync
@@ -44,7 +44,7 @@ def test_cycle_no_done_returns_summary(tmp_path: Path):
     def fake_run_sync(prompt, *, usage_limits=None):
         return FakeRunResult(output="partial progress")
 
-    def fake_agent_init(self, model, *, system_prompt=None, tools=None):
+    def fake_agent_init(self, model, *, system_prompt=None, tools=None, **kwargs):
         self.run_sync = fake_run_sync
 
     team = _make_fake_team()
@@ -62,7 +62,7 @@ def test_usage_limit_exceeded(tmp_path: Path):
     log.init(tmp_path, run_id="api_limit")
     from pydantic_ai.exceptions import UsageLimitExceeded
 
-    def fake_agent_init(self, model, *, system_prompt=None, tools=None):
+    def fake_agent_init(self, model, *, system_prompt=None, tools=None, **kwargs):
         def fake_run_sync(prompt, *, usage_limits=None):
             raise UsageLimitExceeded("limit hit")
         self.run_sync = fake_run_sync
@@ -82,7 +82,7 @@ def test_529_fallback(tmp_path: Path):
 
     call_count = [0]
 
-    def fake_agent_init(self, model, *, system_prompt=None, tools=None):
+    def fake_agent_init(self, model, *, system_prompt=None, tools=None, **kwargs):
         def fake_run_sync(prompt, *, usage_limits=None):
             nonlocal call_count
             call_count[0] += 1

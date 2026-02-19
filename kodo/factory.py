@@ -5,7 +5,9 @@ Centralises the duplicated team-building logic from main.py and cli.py.
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Callable
 
 from kodo import (
@@ -16,6 +18,27 @@ from kodo import (
 )
 from kodo.agent import Agent
 from kodo.orchestrators.base import ORCHESTRATOR_SYSTEM_PROMPT, TeamConfig
+
+
+# ---------------------------------------------------------------------------
+# Backend availability detection
+# ---------------------------------------------------------------------------
+
+@lru_cache(maxsize=1)
+def available_backends() -> dict[str, bool]:
+    """Detect which worker backends are installed and on PATH."""
+    return {
+        "claude": shutil.which("claude") is not None,
+        "cursor": shutil.which("cursor-agent") is not None,
+    }
+
+
+def has_claude() -> bool:
+    return available_backends()["claude"]
+
+
+def has_cursor() -> bool:
+    return available_backends()["cursor"]
 
 
 # ---------------------------------------------------------------------------
@@ -45,28 +68,20 @@ def _build_team_saga(
     tester_timeout_s: float | None = 1800,
     architect_timeout_s: float | None = 600,
 ) -> TeamConfig:
-    """Create the standard team with two workers (fast + smart) and support agents."""
-    worker_fast_session = make_session("cursor", "composer-1.5", budget)
-    worker_smart_session = make_session(
-        "claude", "opus", None, fallback_model="sonnet"
-    )
-    tester_session = make_session(
-        "cursor", "composer-1.5", budget, system_prompt=TESTER_PROMPT
-    )
-    tester_browser_session = make_session(
-        "cursor",
-        "composer-1.5",
-        budget,
-        system_prompt=TESTER_BROWSER_PROMPT,
-        chrome=True,
-    )
-    architect_session = make_session(
-        "claude", "opus", None,
-        system_prompt=ARCHITECT_PROMPT, fallback_model="sonnet",
-    )
+    """Create the saga team, skipping workers whose backends are unavailable."""
+    _has_cursor = has_cursor()
+    _has_claude = has_claude()
+    if not _has_cursor and not _has_claude:
+        raise RuntimeError(
+            "No worker backends available. Install at least one of: "
+            "claude (Claude Code CLI) or cursor-agent (Cursor CLI)."
+        )
 
-    return {
-        "worker_fast": Agent(
+    team: TeamConfig = {}
+
+    if _has_cursor:
+        worker_fast_session = make_session("cursor", "composer-1.5", budget)
+        team["worker_fast"] = Agent(
             worker_fast_session,
             "A fast coding agent (Cursor) for straightforward implementation tasks.\n"
             "Best for: writing new code, simple refactors, adding features with clear specs, "
@@ -82,8 +97,46 @@ def _build_team_saga(
             "next directive for the worker to continue effectively.",
             max_turns=30,
             timeout_s=worker_timeout_s,
-        ),
-        "worker_smart": Agent(
+        )
+
+        tester_session = make_session(
+            "cursor", "composer-1.5", budget, system_prompt=TESTER_PROMPT
+        )
+        team["tester"] = Agent(
+            tester_session,
+            "A testing agent that verifies features work end-to-end.\n"
+            "After 1-2 worker steps, ask the tester to verify with a user-experience "
+            'description (e.g. "a user should be able to...").\n'
+            "Fix any issues the tester finds before moving on to the next feature.\n"
+            "The tester runs the app, checks output, and reports what works and what's broken. "
+            "It does not fix anything.",
+            max_turns=20,
+            timeout_s=tester_timeout_s,
+        )
+
+        tester_browser_session = make_session(
+            "cursor",
+            "composer-1.5",
+            budget,
+            system_prompt=TESTER_BROWSER_PROMPT,
+            chrome=True,
+        )
+        team["tester_browser"] = Agent(
+            tester_browser_session,
+            "A testing agent with browser access for web applications.\n"
+            "Use this instead of the regular tester when the project has a web UI. "
+            "It opens the app in a real browser, interacts with it, and takes screenshots.\n"
+            "Give it a user-experience description to verify. It reports issues but does not "
+            "fix anything.",
+            max_turns=20,
+            timeout_s=tester_timeout_s,
+        )
+
+    if _has_claude:
+        worker_smart_session = make_session(
+            "claude", "opus", None, fallback_model="sonnet"
+        )
+        team["worker_smart"] = Agent(
             worker_smart_session,
             "A powerful reasoning agent (Claude Code) for complex tasks requiring deep thinking.\n"
             "Best for: debugging tricky issues, architectural decisions, complex refactors, "
@@ -102,29 +155,13 @@ def _build_team_saga(
             "next directive for the worker to continue effectively.",
             max_turns=30,
             timeout_s=worker_timeout_s,
-        ),
-        "tester": Agent(
-            tester_session,
-            "A testing agent that verifies features work end-to-end.\n"
-            "After 1-2 worker steps, ask the tester to verify with a user-experience "
-            'description (e.g. "a user should be able to...").\n'
-            "Fix any issues the tester finds before moving on to the next feature.\n"
-            "The tester runs the app, checks output, and reports what works and what's broken. "
-            "It does not fix anything.",
-            max_turns=20,
-            timeout_s=tester_timeout_s,
-        ),
-        "tester_browser": Agent(
-            tester_browser_session,
-            "A testing agent with browser access for web applications.\n"
-            "Use this instead of the regular tester when the project has a web UI. "
-            "It opens the app in a real browser, interacts with it, and takes screenshots.\n"
-            "Give it a user-experience description to verify. It reports issues but does not "
-            "fix anything.",
-            max_turns=20,
-            timeout_s=tester_timeout_s,
-        ),
-        "architect": Agent(
+        )
+
+        architect_session = make_session(
+            "claude", "opus", None,
+            system_prompt=ARCHITECT_PROMPT, fallback_model="sonnet",
+        )
+        team["architect"] = Agent(
             architect_session,
             "A code reviewer that reads the codebase and identifies bugs and structural issues.\n"
             "Use this to survey an existing codebase before planning work, to get a second "
@@ -133,18 +170,26 @@ def _build_team_saga(
             "It does not make changes.",
             max_turns=10,
             timeout_s=architect_timeout_s,
-        ),
-    }
+        )
+
+    return team
 
 
 def _build_team_mission(budget: float | None = None) -> TeamConfig:
-    """Create a two-worker team (fast + smart) for the mission mode."""
-    worker_fast_session = make_session("cursor", "composer-1.5", budget)
-    worker_smart_session = make_session(
-        "claude", "opus", None, fallback_model="sonnet",
-    )
-    return {
-        "worker_fast": Agent(
+    """Create a mission team, skipping workers whose backends are unavailable."""
+    _has_cursor = has_cursor()
+    _has_claude = has_claude()
+    if not _has_cursor and not _has_claude:
+        raise RuntimeError(
+            "No worker backends available. Install at least one of: "
+            "claude (Claude Code CLI) or cursor-agent (Cursor CLI)."
+        )
+
+    team: TeamConfig = {}
+
+    if _has_cursor:
+        worker_fast_session = make_session("cursor", "composer-1.5", budget)
+        team["worker_fast"] = Agent(
             worker_fast_session,
             "A fast coding agent (Cursor) for straightforward implementation tasks.\n"
             "Best for: writing new code, simple refactors, adding features with clear specs, "
@@ -159,8 +204,13 @@ def _build_team_mission(budget: float | None = None) -> TeamConfig:
             "next directive for the worker to continue effectively.",
             max_turns=30,
             timeout_s=1800,
-        ),
-        "worker_smart": Agent(
+        )
+
+    if _has_claude:
+        worker_smart_session = make_session(
+            "claude", "opus", None, fallback_model="sonnet",
+        )
+        team["worker_smart"] = Agent(
             worker_smart_session,
             "A powerful reasoning agent (Claude Code) for complex tasks requiring deep thinking.\n"
             "Best for: debugging tricky issues, architectural decisions, complex refactors, "
@@ -176,19 +226,38 @@ def _build_team_mission(budget: float | None = None) -> TeamConfig:
             "next directive for the worker to continue effectively.",
             max_turns=30,
             timeout_s=1800,
-        ),
-    }
+        )
+
+    return team
 
 
 # ---------------------------------------------------------------------------
 # Mission orchestrator prompt
 # ---------------------------------------------------------------------------
 
-MISSION_SYSTEM_PROMPT = """\
+def _mission_system_prompt() -> str:
+    """Build the mission system prompt based on available backends."""
+    _has_cursor = has_cursor()
+    _has_claude = has_claude()
+
+    if _has_cursor and _has_claude:
+        workers_desc = (
+            "You have a fast worker (Cursor) and a smart worker "
+            "(Claude Code). Use the fast worker for straightforward tasks and the smart "
+            "worker for complex reasoning or when the fast worker struggles."
+        )
+    elif _has_cursor:
+        workers_desc = (
+            "You have a fast worker (Cursor). Use it for all coding tasks."
+        )
+    else:
+        workers_desc = (
+            "You have a smart worker (Claude Code). Use it for all coding tasks."
+        )
+
+    return f"""\
 You are an orchestrator guiding AI workers to solve one focused issue
-in an existing codebase. You have a fast worker (Cursor) and a smart worker
-(Claude Code). Use the fast worker for straightforward tasks and the smart
-worker for complex reasoning or when the fast worker struggles.
+in an existing codebase. {workers_desc}
 
 Your job:
 1. Give a worker a clear, focused directive based on the goal.
@@ -209,24 +278,64 @@ The workers are skilled coders — focus on WHAT and WHY, not HOW."""
 # Mode registry
 # ---------------------------------------------------------------------------
 
-MODES: dict[str, Mode] = {
-    "saga": Mode(
-        name="saga",
-        description="Full team: two workers (fast + smart), tester, browser tester, architect",
-        system_prompt=ORCHESTRATOR_SYSTEM_PROMPT,
-        build_team=_build_team_saga,
-        default_max_exchanges=30,
-        default_max_cycles=5,
-    ),
-    "mission": Mode(
-        name="mission",
-        description="Two workers (fast + smart) solving one issue, orchestrator as quality gate",
-        system_prompt=MISSION_SYSTEM_PROMPT,
-        build_team=_build_team_mission,
-        default_max_exchanges=20,
-        default_max_cycles=1,
-    ),
-}
+def _describe_backends() -> str:
+    """Human-readable summary of available backends for mode descriptions."""
+    parts = []
+    if has_cursor():
+        parts.append("Cursor")
+    if has_claude():
+        parts.append("Claude Code")
+    return " + ".join(parts) if parts else "none"
+
+
+def _saga_description() -> str:
+    agents = []
+    if has_cursor():
+        agents.append("fast worker")
+    if has_claude():
+        agents.append("smart worker")
+    if has_cursor():
+        agents.append("tester")
+        agents.append("browser tester")
+    if has_claude():
+        agents.append("architect")
+    return f"Full team ({_describe_backends()}): {', '.join(agents)}"
+
+
+def _mission_description() -> str:
+    workers = []
+    if has_cursor():
+        workers.append("fast")
+    if has_claude():
+        workers.append("smart")
+    label = " + ".join(workers) if workers else "no"
+    return f"{label.title()} worker(s) ({_describe_backends()}) solving one issue, orchestrator as quality gate"
+
+
+def get_modes() -> dict[str, Mode]:
+    """Build the mode registry based on available backends."""
+    return {
+        "saga": Mode(
+            name="saga",
+            description=_saga_description(),
+            system_prompt=ORCHESTRATOR_SYSTEM_PROMPT,
+            build_team=_build_team_saga,
+            default_max_exchanges=30,
+            default_max_cycles=5,
+        ),
+        "mission": Mode(
+            name="mission",
+            description=_mission_description(),
+            system_prompt=_mission_system_prompt(),
+            build_team=_build_team_mission,
+            default_max_exchanges=20,
+            default_max_cycles=1,
+        ),
+    }
+
+
+# Keep MODES as a lazy accessor for backward compat
+MODES = get_modes()
 
 
 def get_mode(name: str) -> Mode:

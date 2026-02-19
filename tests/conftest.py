@@ -33,6 +33,14 @@ class FakeSession:
     def stats(self) -> SessionStats:
         return self._stats
 
+    @property
+    def cost_bucket(self) -> str:
+        return "test"
+
+    @property
+    def session_id(self) -> str | None:
+        return None
+
     def query(self, prompt: str, project_dir: Path, *, max_turns: int) -> QueryResult:
         self._stats.queries += 1
         return QueryResult(

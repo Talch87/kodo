@@ -39,7 +39,7 @@ def _probe_ollama() -> str | None:
 
 def _probe_gemini() -> str | None:
     """Return the Gemini API key if set, else None."""
-    return os.environ.get("GOOGLE_API_KEY") or None
+    return os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or None
 
 
 def _summarize_ollama(model: str, task: str, report: str) -> str:
