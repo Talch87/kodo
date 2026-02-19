@@ -10,3 +10,19 @@ Proactive Cross-Platform Review — Architect Findings
    pytest and project deps are available before running tests.
 
 4. fail-fast: false — lets all matrix jobs complete so failures on one OS/Python combo don't hide others.
+
+
+CI Run Summary (gh run 22198081835)
+===================================
+Run: https://github.com/ikamensh/kodo/actions/runs/22198081835
+Triggered: push (ci: cross-platform test matrix)
+
+JOBS
+  ✓ test (macos-latest, 3.12) — 43s
+  ✓ test (ubuntu-latest, 3.12) — 1m3s
+  ✗ test (windows-latest, 3.10) — pytest exit 1
+  ✗ test (windows-latest, 3.12) — pytest exit 1
+  ✗ test (ubuntu-latest, 3.10) — pytest exit 1
+  ✗ test (macos-latest, 3.10) — pytest exit 1
+
+Result: 2 passed, 4 failed. Python 3.12 on ubuntu/macos passed; Python 3.10 and Windows need investigation.
