@@ -14,6 +14,35 @@ TeamConfig = dict[str, Agent]
 
 
 @dataclass
+class GoalStage:
+    """One stage in a multi-stage goal plan."""
+
+    index: int  # 1-based
+    name: str  # short label
+    description: str  # full prose for orchestrator
+    acceptance_criteria: str  # verifiable "done" definition
+
+
+@dataclass
+class GoalPlan:
+    """Ordered list of stages with shared architectural context."""
+
+    context: str  # shared architectural context
+    stages: list[GoalStage]
+
+
+@dataclass
+class StageResult:
+    """Groups cycles and outcome for a single stage."""
+
+    stage_index: int
+    stage_name: str
+    cycles: list["CycleResult"] = field(default_factory=list)
+    finished: bool = False
+    summary: str = ""
+
+
+@dataclass
 class CycleResult:
     """Result of a single orchestration cycle (one 'day of work')."""
 
@@ -22,6 +51,7 @@ class CycleResult:
     finished: bool = False
     success: bool = False
     summary: str = ""
+    stage_index: int | None = None
 
 
 @dataclass
@@ -29,6 +59,7 @@ class RunResult:
     """Result of a full multi-cycle run."""
 
     cycles: list[CycleResult] = field(default_factory=list)
+    stage_results: list[StageResult] = field(default_factory=list)
 
     @property
     def total_exchanges(self) -> int:
@@ -281,13 +312,60 @@ def verify_done(
     return None
 
 
+def compose_stage_goal(
+    plan: GoalPlan,
+    stage_index: int,
+    completed_summaries: list[str],
+) -> str:
+    """Build the goal string for a specific stage.
+
+    Includes project context, current stage description + acceptance criteria,
+    summaries of completed stages, and a hint about the next stage.
+    """
+    stage = plan.stages[stage_index - 1]  # 1-based index
+    total = len(plan.stages)
+
+    parts: list[str] = []
+
+    # Project context
+    parts.append(f"# Project Context\n{plan.context}")
+
+    # Progress so far
+    if completed_summaries:
+        parts.append("# Completed Stages")
+        for i, summary in enumerate(completed_summaries, 1):
+            parts.append(f"## Stage {i} — completed\n{summary}")
+
+    # Current stage
+    parts.append(
+        f"# Current Stage ({stage.index}/{total}): {stage.name}\n"
+        f"{stage.description}"
+    )
+    if stage.acceptance_criteria:
+        parts.append(f"## Acceptance Criteria\n{stage.acceptance_criteria}")
+
+    # Hint about next stage
+    if stage.index < total:
+        next_stage = plan.stages[stage.index]  # 0-based for next
+        parts.append(
+            f"## Next Stage Preview\n"
+            f"After this stage, the next stage will be: "
+            f"**{next_stage.name}** — {next_stage.description[:200]}"
+        )
+
+    return "\n\n".join(parts)
+
+
 @dataclass
 class ResumeState:
     """State for resuming a previously interrupted run."""
 
     completed_cycles: int
     prior_summary: str
-    agent_session_ids: dict[str, str] = field(default_factory=dict)
+    agent_session_ids: dict[str, str]
+    completed_stages: list[int]
+    stage_summaries: list[str]
+    current_stage_cycles: int
 
 
 class Orchestrator(Protocol):
@@ -312,6 +390,7 @@ class Orchestrator(Protocol):
         max_exchanges: int = 30,
         max_cycles: int = 5,
         resume: ResumeState | None = None,
+        plan: GoalPlan | None = None,
     ) -> RunResult:
         """Run multiple cycles until done or limit reached."""
         ...
@@ -348,6 +427,7 @@ class OrchestratorBase:
         max_exchanges: int = 30,
         max_cycles: int = 5,
         resume: ResumeState | None = None,
+        plan: GoalPlan | None = None,
     ) -> RunResult:
         from kodo import log
         from kodo.sessions.claude import ClaudeSession
@@ -379,33 +459,27 @@ class OrchestratorBase:
             team=list(team.keys()),
             resumed=resume is not None,
             resume_from_cycle=start_cycle if resume else None,
+            has_stages=plan is not None and len(plan.stages) > 0,
+            num_stages=len(plan.stages) if plan else 0,
         )
         result = RunResult()
 
         try:
-            for i in range(start_cycle, max_cycles + 1):
-                if i > 1:
-                    log.tprint(f"\n[orchestrator] === CYCLE {i}/{max_cycles} ===")
-                log.emit(
-                    "run_cycle",
-                    orchestrator=self._orchestrator_name,
-                    cycle=i,
-                    max_cycles=max_cycles,
-                )
-
-                cycle_result = self.cycle(
-                    goal,
-                    project_dir,
-                    team,
+            if plan and plan.stages:
+                self._run_staged(
+                    goal, project_dir, team, plan, result,
                     max_exchanges=max_exchanges,
+                    max_cycles=max_cycles,
+                    resume=resume,
+                )
+            else:
+                self._run_single(
+                    goal, project_dir, team, result,
+                    max_exchanges=max_exchanges,
+                    max_cycles=max_cycles,
+                    start_cycle=start_cycle,
                     prior_summary=prior_summary,
                 )
-                result.cycles.append(cycle_result)
-
-                if cycle_result.finished:
-                    break
-
-                prior_summary = cycle_result.summary
         finally:
             self._summarizer.shutdown()
 
@@ -421,6 +495,7 @@ class OrchestratorBase:
                 total_cost_usd=result.total_cost_usd,
                 total_exchanges=result.total_exchanges,
                 summary=result.summary,
+                stages_completed=len(result.stage_results),
             )
             log.print_stats_table(final=True)
 
@@ -432,3 +507,169 @@ class OrchestratorBase:
                 open_viewer(log_file)
 
         return result
+
+    def _run_single(
+        self,
+        goal: str,
+        project_dir: Path,
+        team: TeamConfig,
+        result: RunResult,
+        *,
+        max_exchanges: int,
+        max_cycles: int,
+        start_cycle: int,
+        prior_summary: str,
+    ) -> None:
+        """Original single-goal execution loop."""
+        from kodo import log
+
+        for i in range(start_cycle, max_cycles + 1):
+            if i > 1:
+                log.tprint(f"\n[orchestrator] === CYCLE {i}/{max_cycles} ===")
+            log.emit(
+                "run_cycle",
+                orchestrator=self._orchestrator_name,
+                cycle=i,
+                max_cycles=max_cycles,
+            )
+
+            cycle_result = self.cycle(
+                goal,
+                project_dir,
+                team,
+                max_exchanges=max_exchanges,
+                prior_summary=prior_summary,
+            )
+            result.cycles.append(cycle_result)
+
+            if cycle_result.finished:
+                break
+
+            prior_summary = cycle_result.summary
+
+    def _run_staged(
+        self,
+        goal: str,
+        project_dir: Path,
+        team: TeamConfig,
+        plan: GoalPlan,
+        result: RunResult,
+        *,
+        max_exchanges: int,
+        max_cycles: int,
+        resume: ResumeState | None = None,
+    ) -> None:
+        """Staged execution: iterate over plan stages with a shared cycle budget."""
+        from kodo import log
+
+        global_cycle = 0
+        stage_summaries: list[str] = []
+
+        # Resume support: skip completed stages
+        start_stage_idx = 0
+        if resume and resume.completed_stages:
+            start_stage_idx = len(resume.completed_stages)
+            stage_summaries = list(resume.stage_summaries)
+            global_cycle = resume.completed_cycles
+
+        for stage in plan.stages[start_stage_idx:]:
+            log.emit(
+                "stage_start",
+                stage_index=stage.index,
+                stage_name=stage.name,
+                global_cycle=global_cycle,
+                max_cycles=max_cycles,
+            )
+            log.tprint(
+                f"\n[orchestrator] === STAGE {stage.index}/{len(plan.stages)}: "
+                f"{stage.name} ==="
+            )
+
+            stage_goal = compose_stage_goal(plan, stage.index, stage_summaries)
+            prior_summary = ""
+            stage_res = StageResult(
+                stage_index=stage.index,
+                stage_name=stage.name,
+            )
+
+            # Resume: if we're resuming mid-stage, use the prior summary
+            if (
+                resume
+                and resume.current_stage_cycles > 0
+                and stage.index == start_stage_idx + 1
+            ):
+                prior_summary = resume.prior_summary
+
+            stage_finished = False
+            while global_cycle < max_cycles:
+                global_cycle += 1
+                cycle_num = global_cycle
+
+                log.tprint(
+                    f"\n[orchestrator] === CYCLE {cycle_num}/{max_cycles} "
+                    f"(stage {stage.index}) ==="
+                )
+                log.emit(
+                    "run_cycle",
+                    orchestrator=self._orchestrator_name,
+                    cycle=cycle_num,
+                    max_cycles=max_cycles,
+                    stage_index=stage.index,
+                )
+
+                cycle_result = self.cycle(
+                    stage_goal,
+                    project_dir,
+                    team,
+                    max_exchanges=max_exchanges,
+                    prior_summary=prior_summary,
+                )
+                cycle_result.stage_index = stage.index
+                result.cycles.append(cycle_result)
+                stage_res.cycles.append(cycle_result)
+
+                if cycle_result.finished:
+                    stage_finished = True
+                    stage_res.finished = True
+                    stage_res.summary = cycle_result.summary
+                    stage_summaries.append(cycle_result.summary)
+                    log.emit(
+                        "stage_end",
+                        stage_index=stage.index,
+                        stage_name=stage.name,
+                        finished=True,
+                        summary=cycle_result.summary[:1000],
+                        cycles_used=len(stage_res.cycles),
+                    )
+                    log.tprint(
+                        f"[orchestrator] Stage {stage.index} ({stage.name}) "
+                        f"completed in {len(stage_res.cycles)} cycle(s)"
+                    )
+                    break
+
+                prior_summary = cycle_result.summary
+            else:
+                # max_cycles exhausted
+                stage_res.summary = prior_summary
+                log.emit(
+                    "stage_end",
+                    stage_index=stage.index,
+                    stage_name=stage.name,
+                    finished=False,
+                    summary=prior_summary[:1000],
+                    cycles_used=len(stage_res.cycles),
+                    reason="max_cycles_exhausted",
+                )
+                log.tprint(
+                    f"[orchestrator] Stage {stage.index} ({stage.name}) "
+                    f"— budget exhausted after {len(stage_res.cycles)} cycle(s)"
+                )
+
+            result.stage_results.append(stage_res)
+
+            if not stage_finished:
+                # Stage failed or budget exhausted — stop the run
+                log.tprint(
+                    "[orchestrator] Stopping run — stage did not complete"
+                )
+                break

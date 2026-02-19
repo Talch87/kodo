@@ -8,6 +8,9 @@ from pathlib import Path
 from kodo import log
 
 
+_CLI_ARGS = {"event": "cli_args", "mode": "saga", "budget_per_step": None}
+
+
 def _write_events(log_file: Path, events: list[dict]) -> None:
     """Write a list of event dicts as JSONL lines."""
     lines = []
@@ -31,6 +34,7 @@ def test_parse_run_incomplete(tmp_path: Path):
                 "max_cycles": 5,
                 "team": ["worker"],
             },
+            _CLI_ARGS,
             {"event": "cycle_end", "summary": "did stuff", "finished": False},
         ],
     )
@@ -62,6 +66,7 @@ def test_parse_run_finished(tmp_path: Path):
                 "max_cycles": 5,
                 "team": [],
             },
+            _CLI_ARGS,
             {"event": "cycle_end", "summary": "all done", "finished": True},
             {"event": "run_end"},
         ],
@@ -97,6 +102,7 @@ def test_parse_run_multiple_cycles(tmp_path: Path):
                 "max_cycles": 5,
                 "team": [],
             },
+            _CLI_ARGS,
             {"event": "cycle_end", "summary": "first cycle"},
             {"event": "cycle_end", "summary": "second cycle"},
             {"event": "cycle_end", "summary": "third cycle"},
@@ -123,6 +129,7 @@ def test_parse_run_captures_session_ids(tmp_path: Path):
                 "max_cycles": 5,
                 "team": ["worker_fast", "worker_smart"],
             },
+            _CLI_ARGS,
             {
                 "event": "session_query_end",
                 "session": "claude",
@@ -145,6 +152,7 @@ def test_parse_run_corrupt_lines_tolerated(tmp_path: Path):
     content = (
         '{"ts":"t","t":0,"event":"run_start","goal":"g","orchestrator":"api",'
         '"model":"m","project_dir":"/p","max_exchanges":30,"max_cycles":5,"team":[]}\n'
+        '{"ts":"t","t":0,"event":"cli_args","mode":"saga","budget_per_step":null}\n'
         "this is not json\n"
         '{"truncated\n'
         '{"ts":"t","t":0,"event":"cycle_end","summary":"ok"}\n'
@@ -174,6 +182,7 @@ def test_find_incomplete_runs_newest_first(tmp_path: Path):
                 "max_cycles": 5,
                 "team": [],
             },
+            _CLI_ARGS,
             {"event": "cycle_end", "summary": "done"},
             {"event": "run_end"},
         ],
@@ -193,6 +202,7 @@ def test_find_incomplete_runs_newest_first(tmp_path: Path):
                 "max_cycles": 5,
                 "team": [],
             },
+            _CLI_ARGS,
         ],
     )
 
@@ -210,6 +220,7 @@ def test_find_incomplete_runs_newest_first(tmp_path: Path):
                 "max_cycles": 5,
                 "team": [],
             },
+            _CLI_ARGS,
             {"event": "cycle_end", "summary": "older"},
         ],
     )
@@ -226,6 +237,7 @@ def test_find_incomplete_runs_newest_first(tmp_path: Path):
                 "max_cycles": 5,
                 "team": [],
             },
+            _CLI_ARGS,
             {"event": "cycle_end", "summary": "newer"},
         ],
     )

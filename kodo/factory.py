@@ -42,6 +42,26 @@ def has_cursor() -> bool:
     return available_backends()["cursor"]
 
 
+def check_api_key(orchestrator: str, model: str) -> str | None:
+    """Return an error message if the required API key is missing, else None."""
+    import os
+
+    if orchestrator == "claude-code":
+        return None
+
+    _GEMINI_ALIASES = {
+        "gemini-pro", "gemini-flash",
+        "gemini-3-pro-preview", "gemini-3-flash-preview",
+    }
+    if model in _GEMINI_ALIASES or model.startswith("gemini"):
+        if not os.environ.get("GEMINI_API_KEY") and not os.environ.get("GOOGLE_API_KEY"):
+            return "GEMINI_API_KEY (or GOOGLE_API_KEY) not set — required for Gemini models"
+    else:
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            return "ANTHROPIC_API_KEY not set — required for API orchestrator with Claude models"
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Mode
 # ---------------------------------------------------------------------------

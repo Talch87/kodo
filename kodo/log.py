@@ -278,8 +278,12 @@ class RunState:
     last_summary: str
     finished: bool
     agent_session_ids: dict[str, str]  # agent_name → last session_id
-    mode: str = ""
-    budget_per_step: float | None = None
+    mode: str
+    budget_per_step: float | None
+    has_stages: bool
+    completed_stages: list[int]
+    stage_summaries: list[str]
+    current_stage_cycles: int
 
 
 def parse_run(log_file: Path) -> RunState | None:
@@ -290,6 +294,12 @@ def parse_run(log_file: Path) -> RunState | None:
     last_summary = ""
     finished = False
     agent_session_ids: dict[str, str] = {}
+    # Stage tracking
+    has_stages = False
+    completed_stages: list[int] = []
+    stage_summaries: list[str] = []
+    current_stage_cycles = 0
+    current_stage_index: int | None = None
 
     for raw_line in log_file.read_text().splitlines():
         try:
@@ -300,56 +310,63 @@ def parse_run(log_file: Path) -> RunState | None:
         event = evt.get("event")
         if event == "run_start":
             run_start = evt
+            if evt.get("has_stages"):
+                has_stages = True
         elif event == "cli_args":
             cli_args = evt
         elif event == "cycle_end":
             completed_cycles += 1
-            last_summary = evt.get("summary", "")
+            last_summary = evt["summary"]
+            if current_stage_index is not None:
+                current_stage_cycles += 1
         elif event == "run_end":
             finished = True
+        elif event == "stage_start":
+            current_stage_index = evt["stage_index"]
+            current_stage_cycles = 0
+        elif event == "stage_end":
+            stage_idx = evt["stage_index"]
+            if evt["finished"]:
+                completed_stages.append(stage_idx)
+                stage_summaries.append(evt["summary"])
+            current_stage_index = None
+            current_stage_cycles = 0
         elif event == "session_query_end":
-            # Build agent_session_ids from session query logs.
-            # The agent_name is logged in agent_run_start/end but session_query_end
-            # logs have session="claude"/"cursor". We track by session type + model
-            # but more usefully we correlate via the agent_run events.
             sid = evt.get("session_id") or evt.get("chat_id")
             if sid:
-                # Use session type as key; will be correlated with agent names
-                # via the orchestrator_tool_call events
-                session_key = evt.get("session", "unknown")
-                agent_session_ids[session_key] = sid
+                agent_session_ids[evt["session"]] = sid
         elif event == "orchestrator_tool_call":
-            # Track which agent name maps to which session
             pass
         elif event == "agent_run_end":
-            # After an agent run, the most recent session_query_end's session_id
-            # belongs to this agent
-            agent_name = evt.get("agent", "")
+            agent_name = evt["agent"]
             if agent_name:
-                # Check for the latest session_id we've seen
                 for key in list(agent_session_ids.keys()):
                     if key in ("claude", "cursor"):
                         agent_session_ids[agent_name] = agent_session_ids.pop(key)
 
-    if run_start is None:
+    if run_start is None or cli_args is None:
         return None
 
     return RunState(
         run_id=log_file.stem,
         log_file=log_file,
-        goal=run_start.get("goal", ""),
-        orchestrator=run_start.get("orchestrator", ""),
-        model=run_start.get("model", ""),
-        project_dir=run_start.get("project_dir", ""),
-        max_exchanges=run_start.get("max_exchanges", 30),
-        max_cycles=run_start.get("max_cycles", 5),
-        team=run_start.get("team", []),
+        goal=run_start["goal"],
+        orchestrator=run_start["orchestrator"],
+        model=run_start["model"],
+        project_dir=run_start["project_dir"],
+        max_exchanges=run_start["max_exchanges"],
+        max_cycles=run_start["max_cycles"],
+        team=run_start["team"],
         completed_cycles=completed_cycles,
         last_summary=last_summary,
         finished=finished,
         agent_session_ids=agent_session_ids,
-        mode=cli_args.get("mode", "") if cli_args else "",
-        budget_per_step=cli_args.get("budget_per_step") if cli_args else None,
+        mode=cli_args["mode"],
+        budget_per_step=cli_args["budget_per_step"],
+        has_stages=has_stages,
+        completed_stages=completed_stages,
+        stage_summaries=stage_summaries,
+        current_stage_cycles=current_stage_cycles,
     )
 
 

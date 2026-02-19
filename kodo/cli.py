@@ -15,8 +15,8 @@ load_dotenv()
 from simple_term_menu import TerminalMenu
 
 from kodo import log, __version__
-from kodo.factory import MODES, get_mode, build_orchestrator, has_claude, has_cursor
-from kodo.orchestrators.base import ResumeState
+from kodo.factory import MODES, get_mode, build_orchestrator, has_claude, has_cursor, check_api_key
+from kodo.orchestrators.base import GoalPlan, GoalStage, ResumeState
 
 
 def _print_banner() -> None:
@@ -25,19 +25,54 @@ def _print_banner() -> None:
 
 
 INTAKE_PROMPT = """\
-You are a project intake interviewer. The user has provided a high-level goal \
-for a software project. Your job is to:
+You are a project intake interviewer helping refine a software project goal.
 
-1. Read the goal from .kodo/goal.md
-2. Ask clarifying questions about constraints, tech choices, edge cases, \
-   architecture preferences, and scope
-3. Have a natural conversation to refine the goal
+The user will give you their goal as the first message. Your job:
+1. Read it carefully
+2. Ask 2-3 focused clarifying questions about constraints, tech choices, \
+   edge cases, architecture preferences, and scope
+3. Have a natural conversation to fill in gaps
 4. When you have enough clarity, write a refined, detailed goal to \
    .kodo/goal-refined.md
 
-Keep the conversation focused and practical. When you feel the goal is \
-sufficiently clarified, write the refined goal file and tell the user \
-they can type /exit to proceed."""
+Start by acknowledging the goal briefly, then ask your first questions.
+Keep the conversation focused and practical — don't over-interview.
+When you write the refined goal file, tell the user they can type /exit."""
+
+
+INTAKE_STAGES_PROMPT = """\
+You are a project intake interviewer helping refine a software project goal \
+into an ordered list of stages.
+
+The user will give you their goal as the first message. Your job:
+1. Read it carefully
+2. Ask 2-3 focused clarifying questions about constraints, tech choices, \
+   edge cases, architecture preferences, and scope
+3. Have a natural conversation to fill in gaps
+4. When you have enough clarity, write a structured goal plan to \
+   .kodo/goal-plan.json
+
+The JSON format MUST be:
+{
+  "context": "Shared architectural context — tech stack, key files, conventions",
+  "stages": [
+    {
+      "index": 1,
+      "name": "Short label",
+      "description": "Full prose description of what this stage accomplishes",
+      "acceptance_criteria": "Verifiable definition of done for this stage"
+    }
+  ]
+}
+
+Guidelines for staging:
+- Break non-trivial goals into 2-5 stages
+- Each stage should be independently verifiable
+- Order stages so later ones build on earlier ones
+- Trivially simple goals can be a single stage
+- Each stage should be completable in 1-3 orchestrator cycles
+
+When you write the goal plan file, tell the user they can type /exit."""
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +171,8 @@ def run_intake(project_dir: Path, goal_text: str) -> str:
 
     session_id = str(uuid.uuid4())
     print("\n--- Intake interview (chat with Claude, /exit when done) ---\n")
+
+    initial_message = f"Here's my project goal:\n\n{goal_text}"
     proc = subprocess.run(
         [
             "claude",
@@ -145,6 +182,7 @@ def run_intake(project_dir: Path, goal_text: str) -> str:
             INTAKE_PROMPT,
             "--permission-mode",
             "acceptEdits",
+            initial_message,
         ],
         cwd=project_dir,
         env={k: v for k, v in os.environ.items() if k != "CLAUDECODE"},
@@ -164,6 +202,114 @@ def run_intake(project_dir: Path, goal_text: str) -> str:
 
     print("\nNo refined goal written; using original goal.")
     return goal_text
+
+
+def _looks_staged(goal_text: str) -> bool:
+    """Heuristic: detect if goal text has numbered steps or bullet lists."""
+    import re
+
+    # Match patterns like "1. ", "1) ", "- Step 1:", etc.
+    numbered = re.findall(r"^\s*\d+[\.\)]\s+", goal_text, re.MULTILINE)
+    return len(numbered) >= 2
+
+
+def _parse_goal_plan(raw: dict) -> GoalPlan:
+    """Convert a raw dict (from JSON) into a GoalPlan dataclass.
+
+    Skips stages that are missing required fields rather than crashing.
+    """
+    context = raw.get("context")
+    if not context:
+        return GoalPlan(context="", stages=[])  # malformed input, return empty
+    stages = []
+    for s in raw.get("stages", []):
+        if not isinstance(s, dict):
+            continue
+        index = s.get("index")
+        name = s.get("name")
+        description = s.get("description")
+        acceptance_criteria = s.get("acceptance_criteria")
+        if not index or not name or not description or acceptance_criteria is None:
+            continue
+        stages.append(
+            GoalStage(
+                index=index,
+                name=name,
+                description=description,
+                acceptance_criteria=acceptance_criteria,
+            )
+        )
+    return GoalPlan(context=context, stages=stages)
+
+
+def run_staged_intake(project_dir: Path, goal_text: str) -> GoalPlan | None:
+    """Run intake interview focused on producing a staged goal plan.
+
+    Returns a GoalPlan if successful, or None if no plan was produced.
+    """
+    selfo_dir = project_dir / ".kodo"
+    selfo_dir.mkdir(parents=True, exist_ok=True)
+
+    goal_path = selfo_dir / "goal.md"
+    goal_path.write_text(goal_text)
+    print(f"\nGoal saved to {goal_path}")
+
+    session_id = str(uuid.uuid4())
+    print("\n--- Staged intake interview (chat with Claude, /exit when done) ---\n")
+
+    initial_message = f"Here's my project goal:\n\n{goal_text}"
+    proc = subprocess.run(
+        [
+            "claude",
+            "--session-id",
+            session_id,
+            "--system-prompt",
+            INTAKE_STAGES_PROMPT,
+            "--permission-mode",
+            "acceptEdits",
+            initial_message,
+        ],
+        cwd=project_dir,
+        env={k: v for k, v in os.environ.items() if k != "CLAUDECODE"},
+    )
+    if proc.returncode != 0:
+        print(f"\nWarning: claude exited with code {proc.returncode}")
+
+    # Save session ID and extract transcript
+    (selfo_dir / "intake-session-id.txt").write_text(session_id)
+    _extract_intake_transcript(project_dir, session_id)
+
+    plan_path = selfo_dir / "goal-plan.json"
+    if plan_path.exists():
+        try:
+            raw = json.loads(plan_path.read_text())
+            plan = _parse_goal_plan(raw)
+            if plan.stages:
+                print(f"\nGoal plan read from {plan_path}")
+                print(f"  {len(plan.stages)} stage(s):")
+                for s in plan.stages:
+                    print(f"    {s.index}. {s.name}")
+                return plan
+        except json.JSONDecodeError as exc:
+            print(f"\nWarning: invalid JSON in {plan_path}: {exc}")
+
+    print("\nNo goal plan written; will use single-goal mode.")
+    return None
+
+
+def _load_goal_plan(project_dir: Path) -> GoalPlan | None:
+    """Load an existing goal-plan.json if present and valid."""
+    plan_path = project_dir / ".kodo" / "goal-plan.json"
+    if not plan_path.exists():
+        return None
+    try:
+        raw = json.loads(plan_path.read_text())
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(raw, dict):
+        return None
+    plan = _parse_goal_plan(raw)
+    return plan if plan.stages else None
 
 
 def _select_one(title: str, options: list[str], default_index: int = 0) -> str:
@@ -247,6 +393,13 @@ def select_params() -> dict:
             ],
         ).split(" (")[0]
 
+    # Validate API key early
+    key_err = check_api_key(orchestrator, orch_model)
+    if key_err:
+        print(f"\n  Error: {key_err}")
+        print("  Set the key in your environment or .env file and try again.")
+        sys.exit(1)
+
     print(
         "\n  An exchange = one orchestrator turn: think, delegate to agent, read result."
     )
@@ -301,9 +454,13 @@ def _save_config(project_dir: Path, params: dict) -> None:
 def _load_or_select_params(project_dir: Path) -> dict:
     """Offer to reuse previous config, or run interactive selection."""
     cfg_path = _config_path(project_dir)
+    required_keys = {"mode", "orchestrator", "orchestrator_model", "max_exchanges", "max_cycles"}
     if cfg_path.exists():
         try:
             prev = json.loads(cfg_path.read_text())
+        except json.JSONDecodeError:
+            prev = None
+        if isinstance(prev, dict) and required_keys <= prev.keys():
             mode = get_mode(prev["mode"])
             print("\n  Previous config found:")
             print(f"    Mode:         {mode.name} — {mode.description}")
@@ -318,18 +475,21 @@ def _load_or_select_params(project_dir: Path) -> dict:
             reuse = input("\n  Reuse this config? [Y/n] ").strip().lower()
             if not reuse or reuse == "y":
                 return prev
-        except (json.JSONDecodeError, KeyError):
-            pass  # corrupt config, fall through to interactive
 
     params = select_params()
     _save_config(project_dir, params)
     return params
 
 
-def launch_run(project_dir: Path, goal_text: str, params: dict) -> None:
+def launch_run(
+    project_dir: Path,
+    goal_text: str,
+    params: dict,
+    plan: GoalPlan | None = None,
+) -> None:
     """Build team + orchestrator and run."""
     log_path = log.init(project_dir)
-    log.emit("cli_args", **params, goal_text=goal_text)
+    log.emit("cli_args", **params, goal_text=goal_text, has_plan=plan is not None)
 
     mode = get_mode(params["mode"])
     team = mode.build_team(params["budget_per_step"])
@@ -346,6 +506,8 @@ def launch_run(project_dir: Path, goal_text: str, params: dict) -> None:
     print(
         f"Max: {params['max_exchanges']} exchanges/cycle, {params['max_cycles']} cycles"
     )
+    if plan:
+        print(f"Stages: {len(plan.stages)}")
     print(f"Log: {log_path}")
     print()
 
@@ -355,12 +517,21 @@ def launch_run(project_dir: Path, goal_text: str, params: dict) -> None:
         team,
         max_exchanges=params["max_exchanges"],
         max_cycles=params["max_cycles"],
+        plan=plan,
     )
 
     print(f"\n{'=' * 50}")
-    print(
-        f"Done: {len(result.cycles)} cycle(s), {result.total_exchanges} exchanges, ${result.total_cost_usd:.4f}"
-    )
+    if result.stage_results:
+        completed = sum(1 for sr in result.stage_results if sr.finished)
+        print(
+            f"Done: {completed}/{len(result.stage_results)} stage(s) completed, "
+            f"{len(result.cycles)} cycle(s), {result.total_exchanges} exchanges, "
+            f"${result.total_cost_usd:.4f}"
+        )
+    else:
+        print(
+            f"Done: {len(result.cycles)} cycle(s), {result.total_exchanges} exchanges, ${result.total_cost_usd:.4f}"
+        )
     if result.summary:
         print(f"  {result.summary[:300]}")
 
@@ -391,13 +562,26 @@ def launch_resume(project_dir: Path, state: log.RunState) -> None:
         completed_cycles=state.completed_cycles,
         prior_summary=state.last_summary,
         agent_session_ids=state.agent_session_ids,
+        completed_stages=state.completed_stages,
+        stage_summaries=state.stage_summaries,
+        current_stage_cycles=state.current_stage_cycles,
     )
+
+    # Load goal plan if this was a staged run
+    plan: GoalPlan | None = None
+    if state.has_stages:
+        plan = _load_goal_plan(Path(state.project_dir))
 
     print(f"\nResuming run: {state.run_id}")
     print(f"Mode: {mode.name} — {mode.description}")
     print(f"Orchestrator: {params['orchestrator']} ({orchestrator.model})")
     print(f"Team: {', '.join(team.keys())}")
     print(f"Completed cycles: {state.completed_cycles}/{state.max_cycles}")
+    if state.has_stages:
+        print(
+            f"Completed stages: {len(state.completed_stages)}"
+            + (f"/{plan and len(plan.stages)}" if plan else "")
+        )
     if state.agent_session_ids:
         print(f"Resuming sessions: {', '.join(state.agent_session_ids.keys())}")
     print(f"Log: {state.log_file}")
@@ -410,6 +594,7 @@ def launch_resume(project_dir: Path, state: log.RunState) -> None:
         max_exchanges=params["max_exchanges"],
         max_cycles=params["max_cycles"],
         resume=resume,
+        plan=plan,
     )
 
     total_cycles = state.completed_cycles + len(result.cycles)
@@ -511,12 +696,70 @@ def _main_inner() -> None:
         goal_text = get_goal()
 
     # 2. Intake interview (requires Claude Code CLI)
-    if has_claude():
-        skip = input("\nRefine goal with Claude? [Y/n] ").strip().lower()
-        if not skip or skip == "y":
-            goal_text = run_intake(project_dir, goal_text)
-    else:
-        print("\nSkipping intake interview (Claude Code CLI not found).")
+    plan: GoalPlan | None = None
+
+    # Check for existing goal plan first
+    existing_plan = _load_goal_plan(project_dir)
+    if existing_plan:
+        print(f"\nFound existing goal plan ({len(existing_plan.stages)} stages):")
+        print("-" * 40)
+        for s in existing_plan.stages:
+            print(f"  {s.index}. {s.name}")
+            if s.acceptance_criteria:
+                print(f"     Done when: {s.acceptance_criteria[:100]}")
+        print("-" * 40)
+        use_plan = input("Use this goal plan? [Y/n] ").strip().lower()
+        if not use_plan or use_plan == "y":
+            plan = existing_plan
+            # Also load the refined goal if present
+            refined_path = project_dir / ".kodo" / "goal-refined.md"
+            if refined_path.exists():
+                goal_text = refined_path.read_text().strip() or goal_text
+
+    if plan is None:
+        refined_path = project_dir / ".kodo" / "goal-refined.md"
+        if refined_path.exists():
+            refined = refined_path.read_text().strip()
+            if refined:
+                print(f"\nFound refined goal from previous intake:")
+                print("-" * 40)
+                print(refined[:500])
+                if len(refined) > 500:
+                    print("...")
+                print("-" * 40)
+                use_refined = input("Use this refined goal? [Y/n] ").strip().lower()
+                if not use_refined or use_refined == "y":
+                    goal_text = refined
+                elif has_claude():
+                    redo = input("Re-run intake interview? [y/N] ").strip().lower()
+                    if redo == "y":
+                        goal_text = run_intake(project_dir, goal_text)
+        elif has_claude():
+            # Offer staged intake for multi-step goals
+            if _looks_staged(goal_text):
+                print("\nThis goal looks like it has multiple steps.")
+                intake_choice = input(
+                    "Run staged intake (break into stages)? [Y/n] "
+                ).strip().lower()
+                if not intake_choice or intake_choice == "y":
+                    plan = run_staged_intake(project_dir, goal_text)
+                else:
+                    skip = input("Refine goal (single stage)? [Y/n] ").strip().lower()
+                    if not skip or skip == "y":
+                        goal_text = run_intake(project_dir, goal_text)
+            else:
+                skip = input("\nRefine goal with Claude? [Y/n] ").strip().lower()
+                if not skip or skip == "y":
+                    # Offer staged vs single intake
+                    intake_type = input(
+                        "  Break into stages? [y/N] "
+                    ).strip().lower()
+                    if intake_type == "y":
+                        plan = run_staged_intake(project_dir, goal_text)
+                    else:
+                        goal_text = run_intake(project_dir, goal_text)
+        else:
+            print("\nSkipping intake interview (Claude Code CLI not found).")
 
     # 3. Select parameters (or reuse previous config)
     params = _load_or_select_params(project_dir)
@@ -528,6 +771,10 @@ def _main_inner() -> None:
     print("=" * 60)
     print(f"  Project:      {project_dir}")
     print(f"  Goal:         {goal_text[:80]}{'...' if len(goal_text) > 80 else ''}")
+    if plan:
+        print(f"  Stages:       {len(plan.stages)}")
+        for s in plan.stages:
+            print(f"                  {s.index}. {s.name}")
     print(f"  Mode:         {mode.name} — {mode.description}")
     print(f"  Orchestrator: {params['orchestrator']} ({params['orchestrator_model']})")
     print(
@@ -549,7 +796,7 @@ def _main_inner() -> None:
         sys.exit(0)
 
     # 5. Launch
-    launch_run(project_dir, goal_text, params)
+    launch_run(project_dir, goal_text, params, plan=plan)
 
 
 if __name__ == "__main__":

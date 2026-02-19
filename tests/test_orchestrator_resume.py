@@ -64,6 +64,10 @@ def test_resume_skips_completed_cycles(mock_viewer, tmp_project):
     resume = ResumeState(
         completed_cycles=2,
         prior_summary="prior work summary",
+        agent_session_ids={},
+        completed_stages=[],
+        stage_summaries=[],
+        current_stage_cycles=0,
     )
 
     with patch("kodo.viewer.open_viewer", create=True):
@@ -98,6 +102,10 @@ def test_resume_prior_summary_passed(mock_viewer, tmp_project):
     resume = ResumeState(
         completed_cycles=1,
         prior_summary="here is what happened before",
+        agent_session_ids={},
+        completed_stages=[],
+        stage_summaries=[],
+        current_stage_cycles=0,
     )
 
     with patch("kodo.viewer.open_viewer", create=True):
