@@ -1,0 +1,12 @@
+Proactive Cross-Platform Review — Architect Findings
+====================================================
+
+1. Matrix coverage: Run tests on ubuntu-latest, macos-latest, windows-latest × Python 3.10, 3.12.
+   Catches path separators, line endings, and platform-specific behavior early.
+
+2. Python versions: 3.10 and 3.12 cover the declared supported range (>=3.10) and the latest stable.
+
+3. Dependencies: Use `pip install -e ".[test]"` to install the package with test extras; ensures
+   pytest and project deps are available before running tests.
+
+4. fail-fast: false — lets all matrix jobs complete so failures on one OS/Python combo don't hide others.
