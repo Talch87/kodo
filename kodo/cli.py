@@ -18,6 +18,9 @@ import questionary
 _IS_WINDOWS = sys.platform == "win32"
 
 if not _IS_WINDOWS:
+    _IS_WINDOWS = sys.platform == "win32"
+
+if not _IS_WINDOWS:
     from simple_term_menu import TerminalMenu
 >>>>>>> 268d3a3 (added UX/UI designer)
 
@@ -321,44 +324,17 @@ def _load_goal_plan(project_dir: Path) -> GoalPlan | None:
 
 
 def _select_one(title: str, options: list[str], default_index: int = 0) -> str:
-<<<<<<< HEAD
     """Arrow-key single selection. Returns the chosen string."""
-    default = options[default_index] if default_index < len(options) else None
-    result = questionary.select(title, choices=options, default=default).ask()
-    if result is None:
+    menu = TerminalMenu(
+        options,
+        title=title,
+        cursor_index=default_index,
+    )
+    idx = menu.show()
+    if idx is None:
         print("Cancelled.")
         sys.exit(1)
-    return result
-=======
-    """Arrow-key single selection (Unix) or numbered input (Windows)."""
-    if _IS_WINDOWS:
-        print(f"\n{title}")
-        for i, opt in enumerate(options):
-            marker = "*" if i == default_index else " "
-            print(f"  {marker} {i + 1}) {opt}")
-        while True:
-            raw = input(f"  Choose [1-{len(options)}, default={default_index + 1}]: ").strip()
-            if not raw:
-                return options[default_index]
-            try:
-                idx = int(raw) - 1
-                if 0 <= idx < len(options):
-                    return options[idx]
-            except ValueError:
-                pass
-            print(f"  Invalid choice. Enter a number between 1 and {len(options)}.")
-    else:
-        menu = TerminalMenu(
-            options,
-            title=title,
-            cursor_index=default_index,
-        )
-        idx = menu.show()
-        if idx is None:
-            print("Cancelled.")
-            sys.exit(1)
-        return options[idx]
->>>>>>> 268d3a3 (added UX/UI designer)
+    return options[idx]
 
 
 def _select_numeric(
@@ -366,73 +342,24 @@ def _select_numeric(
 ) -> str:
     """Arrow-key selection with a 'Custom...' option for numeric values."""
     choices = presets + ["Custom..."]
-<<<<<<< HEAD
-    default = choices[default_index] if default_index < len(choices) else None
-    result = questionary.select(title, choices=choices, default=default).ask()
-    if result is None:
+    menu = TerminalMenu(
+        choices,
+        title=title,
+        cursor_index=default_index,
+    )
+    idx = menu.show()
+    if idx is None:
         print("Cancelled.")
         sys.exit(1)
-    if result != "Custom...":
-        return result
+    if choices[idx] != "Custom...":
+        return choices[idx]
     while True:
-        raw = questionary.text("  Enter value:").ask()
-        if raw is None:
-            print("Cancelled.")
-            sys.exit(1)
-        raw = raw.strip()
+        raw = input("  Enter value: ").strip()
         try:
             type_fn(raw)
             return raw
         except (ValueError, TypeError):
             print(f"  Invalid input. Expected {type_fn.__name__}.")
-=======
-    if _IS_WINDOWS:
-        print(f"\n{title}")
-        for i, opt in enumerate(choices):
-            marker = "*" if i == default_index else " "
-            print(f"  {marker} {i + 1}) {opt}")
-        while True:
-            raw = input(f"  Choose [1-{len(choices)}, default={default_index + 1}]: ").strip()
-            if not raw:
-                idx = default_index
-            else:
-                try:
-                    idx = int(raw) - 1
-                    if not (0 <= idx < len(choices)):
-                        print(f"  Invalid choice. Enter a number between 1 and {len(choices)}.")
-                        continue
-                except ValueError:
-                    print(f"  Invalid choice. Enter a number between 1 and {len(choices)}.")
-                    continue
-            if choices[idx] != "Custom...":
-                return choices[idx]
-            while True:
-                raw = input("  Enter value: ").strip()
-                try:
-                    type_fn(raw)
-                    return raw
-                except (ValueError, TypeError):
-                    print(f"  Invalid input. Expected {type_fn.__name__}.")
-    else:
-        menu = TerminalMenu(
-            choices,
-            title=title,
-            cursor_index=default_index,
-        )
-        idx = menu.show()
-        if idx is None:
-            print("Cancelled.")
-            sys.exit(1)
-        if choices[idx] != "Custom...":
-            return choices[idx]
-        while True:
-            raw = input("  Enter value: ").strip()
-            try:
-                type_fn(raw)
-                return raw
-            except (ValueError, TypeError):
-                print(f"  Invalid input. Expected {type_fn.__name__}.")
->>>>>>> 268d3a3 (added UX/UI designer)
 
 
 def select_params() -> dict:
@@ -541,14 +468,7 @@ def _load_or_select_params(project_dir: Path) -> dict:
     required_keys = {"mode", "orchestrator", "orchestrator_model", "max_exchanges", "max_cycles"}
     if cfg_path.exists():
         try:
-<<<<<<< HEAD
             prev = json.loads(cfg_path.read_text())
-        except json.JSONDecodeError:
-            prev = None
-        if isinstance(prev, dict) and required_keys <= prev.keys():
-=======
-            prev = json.loads(cfg_path.read_text(encoding="utf-8"))
->>>>>>> 268d3a3 (added UX/UI designer)
             mode = get_mode(prev["mode"])
             print("\n  Previous config found:")
             print(f"    Mode:         {mode.name} — {mode.description}")
