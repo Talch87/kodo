@@ -87,7 +87,7 @@ class CursorSession:
         raw_messages: list[dict] = []
 
         proc = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8"
         )
 
         # Drain stderr in a background thread to avoid deadlock when the

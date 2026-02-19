@@ -54,7 +54,7 @@ Your strategy: leverage the AI workers to solve low level problems, you ensure
 1) right direction: 
  - sound architecture, 
  - right libraries, 
- - right user experience being built.
+ - right user experience being built. When modifying user-facing features, consult the designer agent early to validate UX patterns.
 The insight behind is: worker AI can implement almost any well-formulated feature,
 but its risk is building the wrong thing. 
  

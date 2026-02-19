@@ -134,7 +134,7 @@ def emit(event: str, **data: Any) -> None:
     }
 
     with _lock:
-        with open(_log_file, "a") as f:
+        with open(_log_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, default=_serialize) + "\n")
 
 
@@ -291,7 +291,7 @@ def parse_run(log_file: Path) -> RunState | None:
     finished = False
     agent_session_ids: dict[str, str] = {}
 
-    for raw_line in log_file.read_text().splitlines():
+    for raw_line in log_file.read_text(encoding="utf-8").splitlines():
         try:
             evt = json.loads(raw_line)
         except (json.JSONDecodeError, ValueError):
