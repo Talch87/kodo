@@ -60,7 +60,7 @@ The architect verifier caught **9 rounds of bugs** that the worker agent was bli
 
 You have a Claude Code Max subscription. You can't use it while you sleep.
 
-kodo lets you point that subscription at a goal, go to bed, and wake up to working code that's been independently tested and reviewed. The orchestrator (Gemini Flash, fractions of a cent) directs your subscription-covered Claude Code agents through multiple work cycles with built-in QA.
+kodo lets you set a goal, go to bed, and wake up to working code that's been independently tested and reviewed. The orchestrator (Gemini Flash, fractions of a cent) directs your subscription-covered Claude Code agents through multiple work cycles with built-in QA.
 
 <table>
 <tr><td nowrap>🌙 <strong>Overnight runs</strong></td><td>Set a goal, leave it running for hours. Cycles checkpoint progress automatically.</td></tr>
