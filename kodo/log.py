@@ -94,13 +94,14 @@ _run_stats = RunStats()
 
 def init(project_dir: Path, run_id: str | None = None) -> Path:
     """Initialize logging for a run. Returns the log file path."""
-    global _log_file, _run_id, _start_time, _run_stats
+    global _log_file, _run_id, _start_time, _run_stats, _virtual_cost_note_shown
 
     from kodo import __version__
 
     _run_id = run_id or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     _start_time = time.monotonic()
     _run_stats = RunStats()
+    _virtual_cost_note_shown = False
 
     log_dir = project_dir / ".kodo" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -178,11 +179,15 @@ def _bucket_label(b: str) -> str:
     }.get(b, b)
 
 
+_virtual_cost_note_shown = False
+
+
 def print_stats_table(final: bool = False) -> None:
     """Print a compact stats table to the terminal.
 
     Called periodically during a run and once at termination.
     """
+    global _virtual_cost_note_shown
     stats = _run_stats
     if not stats.agents:
         return
@@ -190,30 +195,33 @@ def print_stats_table(final: bool = False) -> None:
     elapsed = time.monotonic() - (_start_time or time.monotonic())
 
     # Header
-    sep = "-" * 88
+    sep = "-" * 70
     label = "FINAL STATS" if final else "PROGRESS"
     print(f"\n  {sep}")
-    print(f"  | {label:<84} |")
+    print(f"  | {label:<66} |")
     print(
-        f"  | {'Agent':<24} {'Bucket':<12} {'#':>3} {'Cost':>8}"
-        f" {'In':>6} {'Out':>6} {'Time':>7} {'Err':>3} |"
+        f"  | {'Agent':<20} {'Bucket':<10} {'#':>3} {'Cost':>7}"
+        f" {'In':>5} {'Out':>5} {'Time':>6} {'Err':>3} |"
     )
     print(f"  |{sep[1:-1]}|")
 
     for agent, s in sorted(stats.agents.items()):
+        has_tokens = s.cost_bucket != "cursor_subscription"
+        in_tok = _fmt_tokens(s.input_tokens) if has_tokens else "-"
+        out_tok = _fmt_tokens(s.output_tokens) if has_tokens else "-"
         print(
-            f"  | {agent:<24} {_bucket_label(s.cost_bucket):<12}"
-            f" {s.calls:>3} {_fmt_cost(s.cost_usd):>8}"
-            f" {_fmt_tokens(s.input_tokens):>6} {_fmt_tokens(s.output_tokens):>6}"
-            f" {_fmt_time(s.elapsed_s):>7} {s.errors:>3} |"
+            f"  | {agent:<20} {_bucket_label(s.cost_bucket):<10}"
+            f" {s.calls:>3} {_fmt_cost(s.cost_usd):>7}"
+            f" {in_tok:>5} {out_tok:>5}"
+            f" {_fmt_time(s.elapsed_s):>6} {s.errors:>3} |"
         )
 
     # Orchestrator row
     if stats.orchestrator_cost_usd > 0:
         print(
-            f"  | {'orchestrator':<24} {_bucket_label(stats.orchestrator_bucket):<12}"
-            f" {'':>3} {_fmt_cost(stats.orchestrator_cost_usd):>8}"
-            f" {'':>6} {'':>6} {'':>7} {'':>3} |"
+            f"  | {'orchestrator':<20} {_bucket_label(stats.orchestrator_bucket):<10}"
+            f" {'':>3} {_fmt_cost(stats.orchestrator_cost_usd):>7}"
+            f" {'':>5} {'':>5} {'':>6} {'':>3} |"
         )
 
     print(f"  |{sep[1:-1]}|")
@@ -224,16 +232,23 @@ def print_stats_table(final: bool = False) -> None:
     sub = sum(v for k, v in buckets.items() if k != "api")
     total = stats.total_cost()
     print(
-        f"  | {'Total':<24} {'':12} {stats.total_exchanges:>3}"
-        f" {_fmt_cost(total):>8} {'':>6} {'':>6}"
-        f" {_fmt_time(elapsed):>7} {'':>3} |"
+        f"  | {'Total':<20} {'':10} {stats.total_exchanges:>3}"
+        f" {_fmt_cost(total):>7} {'':>5} {'':>5}"
+        f" {_fmt_time(elapsed):>6} {'':>3} |"
     )
     print(
-        f"  |   Real API: {_fmt_cost(api):<10}"
-        f"  Subscription: {_fmt_cost(sub):<10}"
-        f"  Wall: {_fmt_time(elapsed):<25}|"
+        f"  |   API: {_fmt_cost(api):<7}"
+        f"  Virtual: {_fmt_cost(sub):<7}"
+        f"  Wall: {_fmt_time(elapsed):<27}|"
     )
-    print(f"  {sep}\n")
+    print(f"  {sep}")
+    if not _virtual_cost_note_shown and sub > 0:
+        print(
+            "    Virtual = Claude Code's API cost estimate."
+            " Not charged on Max/Pro subscriptions."
+        )
+        _virtual_cost_note_shown = True
+    print()
 
 
 def get_run_id() -> str | None:

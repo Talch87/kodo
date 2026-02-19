@@ -1,25 +1,84 @@
-# kodo
+<p align="center">
+  <img src="docs/logo.png" width="300">
+  <br><br>
+  <strong>Building while you sleep.</strong>
+  <br><br>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10+-blue?logo=python&logoColor=white" alt="Python 3.10+"></a>
+  <a href="https://github.com/ikamen/kodo/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License"></a>
+  <a href="https://docs.anthropic.com/en/docs/claude-code"><img src="https://img.shields.io/badge/Claude_Code-Max-blueviolet?logo=anthropic&logoColor=white" alt="Claude Code"></a>
+  <a href="https://cursor.com"><img src="https://img.shields.io/badge/Cursor-supported-orange?logo=cursor&logoColor=white" alt="Cursor"></a>
+</p>
 
-Autonomous multi-agent coding. An Opus "tech lead" directs Sonnet/Cursor "developers" through persistent sessions, with controllable work cycles and cross-backend coordination.
+---
 
-## Prerequisites
+# 🦉 kodo
 
-You need **at least one** agent backend installed:
+Autonomous multi-agent coding that runs overnight on your Claude Code Max subscription. An orchestrator directs Claude Code agents through work cycles with independent verification — so you wake up to tested, reviewed code instead of a stale terminal.
 
-| Backend | What it does | Install |
-|---------|-------------|---------|
-| [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) | Smart workers + architect (Claude Max subscription) | `npm install -g @anthropic-ai/claude-code` |
-| [Cursor CLI](https://docs.cursor.com/agent) | Fast workers + testers (Cursor subscription) | Comes with Cursor; enable `cursor-agent` in settings |
+## 🎬 How it works in practice
 
-Both are recommended. Claude Code handles complex reasoning, Cursor handles fast iteration and testing.
+Real run from [blackopt](https://github.com/ikamen/blackopt) — building an auto-solving meta-optimizer with 4 new algorithms, adaptive scheduling, and 73 tests. **3 hours unattended, 2 cycles, succeeded.**
 
-For the **API orchestrator** (Gemini or Claude API), set the relevant key in a `.env` file or environment:
-```bash
-GEMINI_API_KEY=...     # for gemini-flash/gemini-pro orchestrator
-ANTHROPIC_API_KEY=...  # for API-billed Claude orchestrator
+```
+🔍 [00:00] orchestrator → architect
+           "Survey the codebase — Solver interface, existing algorithms,
+            where to add new ones."
+📋 [03:04] architect reports back
+           Full architecture survey, found 3 bugs in existing code
+
+🔧 [03:14] orchestrator → worker_smart
+           "Fix structural bugs identified by architect"
+✅ [11:29] worker_smart: 82 turns of editing. All bugs fixed, tests pass.
+
+⚡ [12:36] orchestrator dispatches 3 agents in parallel:
+           → architect:     "Analyze how to implement DE and PSO"
+           → worker_fast:   "Implement TabuSearch and EDA"
+           → worker_smart:  "Build autosolve() — concurrent portfolio,
+                             adaptive scheduling"
+
+🏁 [35:20] orchestrator → done("autosolve complete, 4 new algorithms")
+           → tester:          runs tests ✅
+           → tester_browser:  runs tests ✅
+           → architect:       "ProcessPool is never closed — resource leak" ❌
+           REJECTED
+
+🔧 [45:37] orchestrator → worker_smart: "Fix the resource leak"
+           → done() → architect: "class-variable contamination" ❌
+           REJECTED
+
+           ... 7 more verification rounds ...
+           architect catches: time-slice state mutation, exponential
+           offspring, crossover edge case — each progressively more subtle
+
+🎉 [2:59:50] → done() → tester ✅ → tester_browser ✅ → architect ✅
+             ACCEPTED — "4 new algorithms, autosolve() API, 73 tests pass"
 ```
 
-## Install
+The architect verifier caught **9 rounds of bugs** that the worker agent was blind to — resource leaks, class variable contamination, state mutation — each subtler than the last. A single Claude Code session would likely have shipped with several of these.
+
+## 💤 When to use kodo
+
+You have a Claude Code Max subscription. You can't use it while you sleep.
+
+kodo lets you point that subscription at a goal, go to bed, and wake up to working code that's been independently tested and reviewed. The orchestrator (Gemini Flash, fractions of a cent) directs your subscription-covered Claude Code agents through multiple work cycles with built-in QA.
+
+<table>
+<tr><td nowrap>🌙 <strong>Overnight runs</strong></td><td>Set a goal, leave it running for hours. Cycles checkpoint progress automatically.</td></tr>
+<tr><td nowrap>🔍 <strong>Built-in verification</strong></td><td>Independent architect + tester agents review work before accepting. Catches bugs the implementing agent is blind to.</td></tr>
+<tr><td nowrap>🔄 <strong>Resume interrupted runs</strong></td><td>ctrl-C'd or crashed? <code>kodo --resume</code> picks up where it left off, with agents resuming their prior conversations.</td></tr>
+<tr><td nowrap>🎭 <strong>Role separation</strong></td><td>Orchestrator making judgment calls, workers building code, independent reviewers catching issues.</td></tr>
+<tr><td nowrap>🧠 <strong>Context efficiency</strong></td><td>Work is spread across multiple agent context windows, so tasks that might overwhelm a single agent's context can succeed when agents take turns with focused scopes. Not yet proven to help in practice, but architecturally sound.</td></tr>
+</table>
+
+## 🧑‍💻 When to just use Claude Code directly
+
+<table>
+<tr><td nowrap>📖 <strong>Learning</strong></td><td>You want to stay in the loop and build intuition by watching decisions unfold.</td></tr>
+<tr><td nowrap>🧭 <strong>Exploration</strong></td><td>You don't know what you want yet and are discovering the shape of the solution as you go.</td></tr>
+<tr><td nowrap>🎮 <strong>Steering</strong></td><td>The task needs frequent course corrections that only a human at the keyboard can provide.</td></tr>
+</table>
+
+## 📦 Install
 
 ```bash
 # 1. Install uv (Python package manager) — skip if you already have it
@@ -35,7 +94,24 @@ uv tool install .
 
 That's it. `kodo` is now on your PATH.
 
-## Usage
+### Prerequisites
+
+You need **at least one** agent backend installed:
+
+| Backend | What it does | Install |
+|---------|-------------|---------|
+| 🤖 [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) | Smart workers + architect (Claude Max subscription) | `npm install -g @anthropic-ai/claude-code` |
+| ⚡ [Cursor CLI](https://docs.cursor.com/agent) | Fast workers + testers (Cursor subscription) | Comes with Cursor; enable `cursor-agent` in settings |
+
+Both are recommended. Claude Code handles complex reasoning, Cursor handles fast iteration and testing.
+
+For the **API orchestrator** (Gemini or Claude API), set the relevant key in a `.env` file or environment:
+```bash
+GOOGLE_API_KEY=...     # for gemini-flash/gemini-pro orchestrator
+ANTHROPIC_API_KEY=...  # for API-billed Claude orchestrator
+```
+
+## 🚀 Usage
 
 ```bash
 # Interactive mode (recommended) — walks you through goal, config, launch
@@ -44,6 +120,11 @@ kodo ./my-project        # run in specific directory
 
 # Non-interactive (for scripting)
 python -m kodo.main goal.md ./my-project --mode saga --max-cycles 3
+
+# Resume an interrupted run (looks in project's .kodo/logs/)
+kodo --resume                       # resume latest incomplete run in current dir
+kodo ./my-project --resume          # resume latest in specific project
+kodo --resume 20260218_205503       # resume specific run by ID
 ```
 
 The interactive CLI will:
@@ -53,22 +134,19 @@ The interactive CLI will:
 4. Show a summary and ask for confirmation before starting
 5. Print a live progress table as agents work
 
-**Heads up:** agents run with full permissions (`bypassPermissions` mode). They primarily work in your project directory but **can access any file on your system** (installing dependencies, editing configs, etc.). Make sure you have a git commit or backup before launching.
+> **⚠️ Heads up:** agents run with full permissions (`bypassPermissions` mode). They primarily work in your project directory but **can access any file on your system** (installing dependencies, editing configs, etc.). Make sure you have a git commit or backup before launching.
 
-## When to use this over plain Claude Code
+## 🏗️ Architecture
 
-- **Role and model separation** — Opus orchestrator making judgment calls, Sonnet workers building code.
-- **Cross-backend teams** — mix Claude and Cursor agents on the same goal.
-- **Work cycles** — run one cycle, inspect, commit, decide whether to continue. Clean checkpoints.
-- **Persistent agent memory** — agents maintain conversation state across multiple tasks within a session.
-
-## When to just use Claude Code directly
-
-- Most tasks. Seriously. Claude Code is good, and orchestration adds latency + cost.
-- Single-session work that fits in one context window.
-- When you don't need cross-backend coordination.
-
-## Architecture
+```
+🦉 Orchestrator (Gemini Flash — fractions of a cent)
+ │
+ ├── 🔍 architect        Survey codebase, review code, find bugs
+ ├── 🧠 worker_smart     Complex implementation (Claude Code)
+ ├── ⚡ worker_fast       Quick tasks, iterations (Cursor)
+ ├── 🧪 tester           Run tests, verify behavior
+ └── 🌐 tester_browser   Browser-based UI testing
+```
 
 ```
 kodo/
@@ -92,22 +170,22 @@ kodo/
 - **Agent** — a prompt + session + turn budget. Call `agent.run(task, project_dir)` to get work done.
 - **Orchestrator** — an LLM that delegates to a team of agents via tool calls:
   - `ClaudeCodeOrchestrator` — runs on Claude Code with agents as MCP tools. Free on Max subscription.
-  - `ApiOrchestrator` — runs on Anthropic/Gemini API. Pay-per-token.
+  - `ApiOrchestrator` — runs on Anthropic/Gemini API. Pay-per-token orchestrator, but workers still use your subscription.
 - **Cycle** — one unit of orchestrated work. Think of it as one dev session.
 - **Run** — multiple cycles until done, with summaries bridging context between cycles.
 
-## Cost tracking
+## 💰 Cost tracking
 
 Kodo tracks costs in two buckets:
 
 | Bucket | What | Example |
 |--------|------|---------|
-| **API** | Real money — pay-per-token orchestrator calls | Gemini Flash orchestrator: ~$0.13/run |
-| **Subscription** | Covered by flat-rate subscription | Claude Max workers: reported but $0 actual |
+| **🔑 API** | Real money — pay-per-token orchestrator calls | Gemini Flash orchestrator: ~$0.13/run |
+| **✨ Virtual** | **Not charged.** Claude Code SDK reports what API usage *would* cost — but on a Max/Pro subscription you pay nothing extra. | Claude Max workers: shows ~$1.69, actual spend $0 |
 
-The live progress table and final summary show both, so you always know your real spend.
+The progress table labels subscription-covered costs as **Virtual** to make this clear. Only the **API** bucket represents real spend.
 
-## Analyzing past runs
+## 🔎 Analyzing past runs
 
 ```bash
 # Open the interactive HTML viewer
@@ -117,7 +195,7 @@ python -m kodo.viewer .kodo/logs/20260218_205503.jsonl
 python analyze_run.py .kodo/logs/*.jsonl
 ```
 
-## Programmatic usage
+## 🐍 Programmatic usage
 
 ```python
 from kodo import Agent

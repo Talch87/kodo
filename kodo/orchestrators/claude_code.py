@@ -84,9 +84,10 @@ def _build_mcp_server(
                     report=report,
                 )
 
-                log.tprint(
-                    f"[{agent_name}] done ({result.elapsed_s:.1f}s) | session: {result.session_tokens:,} tokens"
-                )
+                done_msg = f"[{agent_name}] done ({result.elapsed_s:.1f}s)"
+                if agent_obj.session.cost_bucket != "cursor_subscription":
+                    done_msg += f" | session: {result.session_tokens:,} tokens"
+                log.tprint(done_msg)
                 if result.is_error:
                     log.tprint(f"[{agent_name}] reported error")
                 if result.context_reset:

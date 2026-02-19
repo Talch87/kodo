@@ -107,10 +107,10 @@ def _build_tools(
                     report=report,
                 )
 
-                log.tprint(
-                    f"[{agent_name}] done ({agent_result.elapsed_s:.1f}s)"
-                    f" | session: {agent_result.session_tokens:,} tokens"
-                )
+                done_msg = f"[{agent_name}] done ({agent_result.elapsed_s:.1f}s)"
+                if agent_obj.session.cost_bucket != "cursor_subscription":
+                    done_msg += f" | session: {agent_result.session_tokens:,} tokens"
+                log.tprint(done_msg)
                 if agent_result.is_error:
                     log.tprint(f"[{agent_name}] reported error")
                 if agent_result.context_reset:
