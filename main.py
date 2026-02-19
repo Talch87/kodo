@@ -97,7 +97,7 @@ examples:
     if not goal.exists():
         print(f"Error: goal file not found: {args.goal}")
         sys.exit(1)
-    goal_text = goal.read_text()
+    goal_text = goal.read_text(encoding="utf-8")
 
     project_dir = Path(args.project_dir)
     project_dir.mkdir(parents=True, exist_ok=True)

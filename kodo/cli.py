@@ -12,7 +12,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+<<<<<<< HEAD
 import questionary
+=======
+_IS_WINDOWS = sys.platform == "win32"
+
+if not _IS_WINDOWS:
+    from simple_term_menu import TerminalMenu
+>>>>>>> 268d3a3 (added UX/UI designer)
 
 from kodo import log, __version__
 from kodo.factory import MODES, get_mode, build_orchestrator, has_claude, has_cursor, check_api_key
@@ -103,7 +110,7 @@ def get_goal() -> str:
 def _extract_intake_transcript(project_dir: Path, session_id: str) -> None:
     """Extract human-readable transcript from a Claude Code session file."""
     # Claude stores sessions under ~/.claude/projects/<escaped-path>/<session-id>.jsonl
-    escaped = str(project_dir).replace("/", "-")
+    escaped = str(project_dir).replace("\\", "-").replace("/", "-")
     session_file = (
         Path.home() / ".claude" / "projects" / escaped / f"{session_id}.jsonl"
     )
@@ -111,7 +118,7 @@ def _extract_intake_transcript(project_dir: Path, session_id: str) -> None:
         return
 
     lines = []
-    for raw in session_file.read_text().splitlines():
+    for raw in session_file.read_text(encoding="utf-8").splitlines():
         try:
             d = json.loads(raw)
         except json.JSONDecodeError:
@@ -156,7 +163,8 @@ def _extract_intake_transcript(project_dir: Path, session_id: str) -> None:
         transcript_path = selfo_dir / "intake-transcript.md"
         transcript_path.write_text(
             f"# Intake Interview Transcript\n\n"
-            f"*Session ID: {session_id}*\n\n---\n\n" + "\n".join(lines)
+            f"*Session ID: {session_id}*\n\n---\n\n" + "\n".join(lines),
+            encoding="utf-8",
         )
 
 
@@ -166,7 +174,7 @@ def run_intake(project_dir: Path, goal_text: str) -> str:
     selfo_dir.mkdir(parents=True, exist_ok=True)
 
     goal_path = selfo_dir / "goal.md"
-    goal_path.write_text(goal_text)
+    goal_path.write_text(goal_text, encoding="utf-8")
     print(f"\nGoal saved to {goal_path}")
 
     session_id = str(uuid.uuid4())
@@ -191,12 +199,12 @@ def run_intake(project_dir: Path, goal_text: str) -> str:
         print(f"\nWarning: claude exited with code {proc.returncode}")
 
     # Save session ID and extract transcript
-    (selfo_dir / "intake-session-id.txt").write_text(session_id)
+    (selfo_dir / "intake-session-id.txt").write_text(session_id, encoding="utf-8")
     _extract_intake_transcript(project_dir, session_id)
 
     refined_path = selfo_dir / "goal-refined.md"
     if refined_path.exists():
-        refined = refined_path.read_text().strip()
+        refined = refined_path.read_text(encoding="utf-8").strip()
         print(f"\nRefined goal read from {refined_path}")
         return refined
 
@@ -313,6 +321,7 @@ def _load_goal_plan(project_dir: Path) -> GoalPlan | None:
 
 
 def _select_one(title: str, options: list[str], default_index: int = 0) -> str:
+<<<<<<< HEAD
     """Arrow-key single selection. Returns the chosen string."""
     default = options[default_index] if default_index < len(options) else None
     result = questionary.select(title, choices=options, default=default).ask()
@@ -320,6 +329,36 @@ def _select_one(title: str, options: list[str], default_index: int = 0) -> str:
         print("Cancelled.")
         sys.exit(1)
     return result
+=======
+    """Arrow-key single selection (Unix) or numbered input (Windows)."""
+    if _IS_WINDOWS:
+        print(f"\n{title}")
+        for i, opt in enumerate(options):
+            marker = "*" if i == default_index else " "
+            print(f"  {marker} {i + 1}) {opt}")
+        while True:
+            raw = input(f"  Choose [1-{len(options)}, default={default_index + 1}]: ").strip()
+            if not raw:
+                return options[default_index]
+            try:
+                idx = int(raw) - 1
+                if 0 <= idx < len(options):
+                    return options[idx]
+            except ValueError:
+                pass
+            print(f"  Invalid choice. Enter a number between 1 and {len(options)}.")
+    else:
+        menu = TerminalMenu(
+            options,
+            title=title,
+            cursor_index=default_index,
+        )
+        idx = menu.show()
+        if idx is None:
+            print("Cancelled.")
+            sys.exit(1)
+        return options[idx]
+>>>>>>> 268d3a3 (added UX/UI designer)
 
 
 def _select_numeric(
@@ -327,6 +366,7 @@ def _select_numeric(
 ) -> str:
     """Arrow-key selection with a 'Custom...' option for numeric values."""
     choices = presets + ["Custom..."]
+<<<<<<< HEAD
     default = choices[default_index] if default_index < len(choices) else None
     result = questionary.select(title, choices=choices, default=default).ask()
     if result is None:
@@ -345,6 +385,54 @@ def _select_numeric(
             return raw
         except (ValueError, TypeError):
             print(f"  Invalid input. Expected {type_fn.__name__}.")
+=======
+    if _IS_WINDOWS:
+        print(f"\n{title}")
+        for i, opt in enumerate(choices):
+            marker = "*" if i == default_index else " "
+            print(f"  {marker} {i + 1}) {opt}")
+        while True:
+            raw = input(f"  Choose [1-{len(choices)}, default={default_index + 1}]: ").strip()
+            if not raw:
+                idx = default_index
+            else:
+                try:
+                    idx = int(raw) - 1
+                    if not (0 <= idx < len(choices)):
+                        print(f"  Invalid choice. Enter a number between 1 and {len(choices)}.")
+                        continue
+                except ValueError:
+                    print(f"  Invalid choice. Enter a number between 1 and {len(choices)}.")
+                    continue
+            if choices[idx] != "Custom...":
+                return choices[idx]
+            while True:
+                raw = input("  Enter value: ").strip()
+                try:
+                    type_fn(raw)
+                    return raw
+                except (ValueError, TypeError):
+                    print(f"  Invalid input. Expected {type_fn.__name__}.")
+    else:
+        menu = TerminalMenu(
+            choices,
+            title=title,
+            cursor_index=default_index,
+        )
+        idx = menu.show()
+        if idx is None:
+            print("Cancelled.")
+            sys.exit(1)
+        if choices[idx] != "Custom...":
+            return choices[idx]
+        while True:
+            raw = input("  Enter value: ").strip()
+            try:
+                type_fn(raw)
+                return raw
+            except (ValueError, TypeError):
+                print(f"  Invalid input. Expected {type_fn.__name__}.")
+>>>>>>> 268d3a3 (added UX/UI designer)
 
 
 def select_params() -> dict:
@@ -444,7 +532,7 @@ def _config_path(project_dir: Path) -> Path:
 def _save_config(project_dir: Path, params: dict) -> None:
     path = _config_path(project_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(params, indent=2))
+    path.write_text(json.dumps(params, indent=2), encoding="utf-8")
 
 
 def _load_or_select_params(project_dir: Path) -> dict:
@@ -453,10 +541,14 @@ def _load_or_select_params(project_dir: Path) -> dict:
     required_keys = {"mode", "orchestrator", "orchestrator_model", "max_exchanges", "max_cycles"}
     if cfg_path.exists():
         try:
+<<<<<<< HEAD
             prev = json.loads(cfg_path.read_text())
         except json.JSONDecodeError:
             prev = None
         if isinstance(prev, dict) and required_keys <= prev.keys():
+=======
+            prev = json.loads(cfg_path.read_text(encoding="utf-8"))
+>>>>>>> 268d3a3 (added UX/UI designer)
             mode = get_mode(prev["mode"])
             print("\n  Previous config found:")
             print(f"    Mode:         {mode.name} — {mode.description}")
@@ -678,7 +770,7 @@ def _main_inner() -> None:
     )
 
     if goal_file is not None:
-        goal_text = goal_file.read_text().strip()
+        goal_text = goal_file.read_text(encoding="utf-8").strip()
         print(f"\nFound existing goal in {goal_file}:")
         print("-" * 40)
         print(goal_text[:500])
