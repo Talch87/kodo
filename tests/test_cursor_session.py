@@ -12,8 +12,10 @@ from tests.mocks.cursor_process import MockCursorProcess
 
 def _make_popen_factory(**defaults):
     """Return a factory that creates MockCursorProcess with given defaults."""
+
     def factory(cmd, **kwargs):
         return MockCursorProcess(cmd, **defaults, **kwargs)
+
     return factory
 
 
@@ -21,8 +23,10 @@ def test_query_returns_result(tmp_path: Path):
     log.init(tmp_path, run_id="cursor_test")
     session = CursorSession(model="composer-1.5")
 
-    with patch("kodo.sessions.cursor.subprocess.Popen",
-               _make_popen_factory(result_text="All done!", chat_id="c1")):
+    with patch(
+        "kodo.sessions.cursor.subprocess.Popen",
+        _make_popen_factory(result_text="All done!", chat_id="c1"),
+    ):
         result = session.query("do stuff", tmp_path, max_turns=10)
 
     assert result.text == "All done!"
@@ -34,8 +38,10 @@ def test_chat_id_captured_for_resume(tmp_path: Path):
     log.init(tmp_path, run_id="cursor_resume")
     session = CursorSession(model="composer-1.5")
 
-    with patch("kodo.sessions.cursor.subprocess.Popen",
-               _make_popen_factory(result_text="ok", chat_id="chat-xyz")):
+    with patch(
+        "kodo.sessions.cursor.subprocess.Popen",
+        _make_popen_factory(result_text="ok", chat_id="chat-xyz"),
+    ):
         session.query("first", tmp_path, max_turns=10)
 
     # Second query should include --resume
@@ -77,10 +83,12 @@ def test_error_on_nonzero_returncode(tmp_path: Path):
     log.init(tmp_path, run_id="cursor_error")
     session = CursorSession(model="composer-1.5")
 
-    with patch("kodo.sessions.cursor.subprocess.Popen",
-               _make_popen_factory(
-                   result_text="", chat_id="c1", returncode=1,
-                   stderr_text="fatal error\n")):
+    with patch(
+        "kodo.sessions.cursor.subprocess.Popen",
+        _make_popen_factory(
+            result_text="", chat_id="c1", returncode=1, stderr_text="fatal error\n"
+        ),
+    ):
         result = session.query("fail", tmp_path, max_turns=10)
 
     assert result.is_error is True
@@ -90,8 +98,10 @@ def test_reset_clears_state(tmp_path: Path):
     log.init(tmp_path, run_id="cursor_reset")
     session = CursorSession(model="composer-1.5")
 
-    with patch("kodo.sessions.cursor.subprocess.Popen",
-               _make_popen_factory(result_text="ok", chat_id="c1")):
+    with patch(
+        "kodo.sessions.cursor.subprocess.Popen",
+        _make_popen_factory(result_text="ok", chat_id="c1"),
+    ):
         session.query("task", tmp_path, max_turns=10)
 
     assert session.stats.queries == 1

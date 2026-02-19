@@ -14,14 +14,17 @@ class MockResultMessage:
     is_error: bool = False
     num_turns: int | None = 1
     total_cost_usd: float | None = 0.0
-    usage: dict | None = field(default_factory=lambda: {
-        "input_tokens": 100,
-        "output_tokens": 50,
-    })
+    usage: dict | None = field(
+        default_factory=lambda: {
+            "input_tokens": 100,
+            "output_tokens": 50,
+        }
+    )
 
 
 class MockPermissionResultAllow:
     """Mimics claude_agent_sdk.types.PermissionResultAllow."""
+
     pass
 
 

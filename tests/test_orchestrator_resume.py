@@ -32,10 +32,12 @@ class FakeOrchestrator(OrchestratorBase):
         max_exchanges: int = 30,
         prior_summary: str = "",
     ) -> CycleResult:
-        self._cycle_calls.append({
-            "goal": goal,
-            "prior_summary": prior_summary,
-        })
+        self._cycle_calls.append(
+            {
+                "goal": goal,
+                "prior_summary": prior_summary,
+            }
+        )
         if self._cycle_results:
             return self._cycle_results.pop(0)
         return CycleResult(summary="cycle done")
@@ -51,10 +53,12 @@ def tmp_project(tmp_path: Path) -> Path:
 @patch("kodo.orchestrators.base.open_viewer", create=True)
 def test_resume_skips_completed_cycles(mock_viewer, tmp_project):
     """When resuming after 2 completed cycles with max_cycles=5, run starts at cycle 3."""
-    orch = FakeOrchestrator(cycle_results=[
-        CycleResult(summary="cycle 3 done"),
-        CycleResult(summary="cycle 4", finished=True, success=True),
-    ])
+    orch = FakeOrchestrator(
+        cycle_results=[
+            CycleResult(summary="cycle 3 done"),
+            CycleResult(summary="cycle 4", finished=True, success=True),
+        ]
+    )
     team = {"worker": make_agent()}
 
     resume = ResumeState(
@@ -64,8 +68,12 @@ def test_resume_skips_completed_cycles(mock_viewer, tmp_project):
 
     with patch("kodo.viewer.open_viewer", create=True):
         result = orch.run(
-            "test goal", tmp_project, team,
-            max_exchanges=20, max_cycles=5, resume=resume,
+            "test goal",
+            tmp_project,
+            team,
+            max_exchanges=20,
+            max_cycles=5,
+            resume=resume,
         )
 
     # Should have called cycle twice (cycles 3 and 4)
@@ -80,9 +88,11 @@ def test_resume_skips_completed_cycles(mock_viewer, tmp_project):
 @patch("kodo.orchestrators.base.open_viewer", create=True)
 def test_resume_prior_summary_passed(mock_viewer, tmp_project):
     """First resumed cycle receives the prior_summary from ResumeState."""
-    orch = FakeOrchestrator(cycle_results=[
-        CycleResult(summary="done", finished=True),
-    ])
+    orch = FakeOrchestrator(
+        cycle_results=[
+            CycleResult(summary="done", finished=True),
+        ]
+    )
     team = {"worker": make_agent()}
 
     resume = ResumeState(
@@ -99,9 +109,11 @@ def test_resume_prior_summary_passed(mock_viewer, tmp_project):
 @patch("kodo.orchestrators.base.open_viewer", create=True)
 def test_normal_run_unchanged(mock_viewer, tmp_project):
     """Without resume, run starts at cycle 1 with empty prior_summary."""
-    orch = FakeOrchestrator(cycle_results=[
-        CycleResult(summary="done", finished=True),
-    ])
+    orch = FakeOrchestrator(
+        cycle_results=[
+            CycleResult(summary="done", finished=True),
+        ]
+    )
     team = {"worker": make_agent()}
 
     with patch("kodo.viewer.open_viewer", create=True):
@@ -131,6 +143,7 @@ def test_keyboard_interrupt_emits_run_end(mock_viewer, tmp_project):
     log_file = log.get_log_file()
     assert log_file is not None
     import json
+
     events = []
     for line in log_file.read_text().splitlines():
         try:

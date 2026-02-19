@@ -25,10 +25,13 @@ def test_all_pass(tmp_project: Path) -> None:
     assert verify_done(GOAL, SUMMARY, team, tmp_project) is None
 
 
-@pytest.mark.parametrize("role,other_role,issue_label", [
-    ("tester", "architect", "tester found issues"),
-    ("architect", "tester", "Architect found issues"),
-])
+@pytest.mark.parametrize(
+    "role,other_role,issue_label",
+    [
+        ("tester", "architect", "tester found issues"),
+        ("architect", "tester", "Architect found issues"),
+    ],
+)
 def test_single_role_fails(tmp_project: Path, role, other_role, issue_label) -> None:
     """When one verifier finds issues, verify_done returns rejection."""
     team = {
@@ -167,10 +170,13 @@ class _CrashingSession(FakeSession):
         raise RuntimeError("SDK connection lost")
 
 
-@pytest.mark.parametrize("role,label", [
-    ("tester", "tester crashed"),
-    ("architect", "Architect crashed"),
-])
+@pytest.mark.parametrize(
+    "role,label",
+    [
+        ("tester", "tester crashed"),
+        ("architect", "Architect crashed"),
+    ],
+)
 def test_exception_becomes_rejection(tmp_project: Path, role, label) -> None:
     """BUG FIX: agent crash should be a rejection, not an unhandled exception."""
     other = "architect" if role == "tester" else "tester"

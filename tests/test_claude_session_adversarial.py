@@ -42,7 +42,9 @@ def _fake_modules(responses=None, client_factory=None):
     }
 
 
-def _run_session(tmp_path, run_id, responses=None, client_factory=None, **session_kwargs):
+def _run_session(
+    tmp_path, run_id, responses=None, client_factory=None, **session_kwargs
+):
     """Helper: create session, run one query, clean up. Returns (session, result)."""
     log.init(tmp_path, run_id=run_id)
     session_kwargs.setdefault("use_api_key", True)
@@ -61,8 +63,9 @@ def _run_session(tmp_path, run_id, responses=None, client_factory=None, **sessio
 
 def test_none_cost_treated_as_zero(tmp_path: Path):
     """If total_cost_usd is None, stats should accumulate 0, not crash."""
-    resp = MockResultMessage(result="ok", total_cost_usd=None,
-                             usage={"input_tokens": 10, "output_tokens": 5})
+    resp = MockResultMessage(
+        result="ok", total_cost_usd=None, usage={"input_tokens": 10, "output_tokens": 5}
+    )
     session, result = _run_session(tmp_path, "none_cost", responses=[resp])
 
     assert session.stats.total_cost_usd == 0.0

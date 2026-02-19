@@ -184,7 +184,9 @@ def verify_done(
 
     for tester_name, tester_agent in tester_agents:
         try:
-            log.tprint(f"[done] running {tester_name} verification (attempt {attempt})...")
+            log.tprint(
+                f"[done] running {tester_name} verification (attempt {attempt})..."
+            )
             tester_result = tester_agent.run(
                 verification_prompt
                 + "Verify this works end-to-end. Report ONLY issues found. "
@@ -232,15 +234,19 @@ def verify_done(
     has_dedicated_verifiers = bool(tester_agents) or architect_agent is not None
     if not has_dedicated_verifiers:
         # Prefer worker_smart, fall back to any worker
-        verifier = team.get("worker_smart") or team.get("worker") or next(
-            (a for a in team.values()), None
+        verifier = (
+            team.get("worker_smart")
+            or team.get("worker")
+            or next((a for a in team.values()), None)
         )
         if verifier:
             verifier_name = next(
                 (n for n, a in team.items() if a is verifier), "worker"
             )
             try:
-                log.tprint(f"[done] running {verifier_name} as verifier (fresh session)...")
+                log.tprint(
+                    f"[done] running {verifier_name} as verifier (fresh session)..."
+                )
                 verify_result = verifier.run(
                     verification_prompt
                     + "You are reviewing work done by another agent. "
@@ -254,7 +260,9 @@ def verify_done(
                 )
                 verify_report = verify_result.text or ""
                 log.emit(
-                    "done_verification", agent=verifier_name, report=verify_report[:5000]
+                    "done_verification",
+                    agent=verifier_name,
+                    report=verify_report[:5000],
                 )
                 if not _check_passed(verify_report):
                     issues.append(

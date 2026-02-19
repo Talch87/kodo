@@ -25,6 +25,7 @@ _lock = threading.Lock()
 # Live run statistics
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class _AgentStats:
     calls: int = 0
@@ -83,7 +84,9 @@ class RunStats:
         return dict(buckets)
 
     def total_cost(self) -> float:
-        return sum(s.cost_usd for s in self.agents.values()) + self.orchestrator_cost_usd
+        return (
+            sum(s.cost_usd for s in self.agents.values()) + self.orchestrator_cost_usd
+        )
 
 
 _run_stats = RunStats()
@@ -168,8 +171,11 @@ def _fmt_cost(c: float) -> str:
 
 
 def _bucket_label(b: str) -> str:
-    return {"api": "API", "claude_subscription": "Claude sub",
-            "cursor_subscription": "Cursor sub"}.get(b, b)
+    return {
+        "api": "API",
+        "claude_subscription": "Claude sub",
+        "cursor_subscription": "Cursor sub",
+    }.get(b, b)
 
 
 def print_stats_table(final: bool = False) -> None:
@@ -188,21 +194,27 @@ def print_stats_table(final: bool = False) -> None:
     label = "FINAL STATS" if final else "PROGRESS"
     print(f"\n  {sep}")
     print(f"  | {label:<84} |")
-    print(f"  | {'Agent':<24} {'Bucket':<12} {'#':>3} {'Cost':>8}"
-          f" {'In':>6} {'Out':>6} {'Time':>7} {'Err':>3} |")
+    print(
+        f"  | {'Agent':<24} {'Bucket':<12} {'#':>3} {'Cost':>8}"
+        f" {'In':>6} {'Out':>6} {'Time':>7} {'Err':>3} |"
+    )
     print(f"  |{sep[1:-1]}|")
 
     for agent, s in sorted(stats.agents.items()):
-        print(f"  | {agent:<24} {_bucket_label(s.cost_bucket):<12}"
-              f" {s.calls:>3} {_fmt_cost(s.cost_usd):>8}"
-              f" {_fmt_tokens(s.input_tokens):>6} {_fmt_tokens(s.output_tokens):>6}"
-              f" {_fmt_time(s.elapsed_s):>7} {s.errors:>3} |")
+        print(
+            f"  | {agent:<24} {_bucket_label(s.cost_bucket):<12}"
+            f" {s.calls:>3} {_fmt_cost(s.cost_usd):>8}"
+            f" {_fmt_tokens(s.input_tokens):>6} {_fmt_tokens(s.output_tokens):>6}"
+            f" {_fmt_time(s.elapsed_s):>7} {s.errors:>3} |"
+        )
 
     # Orchestrator row
     if stats.orchestrator_cost_usd > 0:
-        print(f"  | {'orchestrator':<24} {_bucket_label(stats.orchestrator_bucket):<12}"
-              f" {'':>3} {_fmt_cost(stats.orchestrator_cost_usd):>8}"
-              f" {'':>6} {'':>6} {'':>7} {'':>3} |")
+        print(
+            f"  | {'orchestrator':<24} {_bucket_label(stats.orchestrator_bucket):<12}"
+            f" {'':>3} {_fmt_cost(stats.orchestrator_cost_usd):>8}"
+            f" {'':>6} {'':>6} {'':>7} {'':>3} |"
+        )
 
     print(f"  |{sep[1:-1]}|")
 
@@ -211,12 +223,16 @@ def print_stats_table(final: bool = False) -> None:
     api = buckets.get("api", 0)
     sub = sum(v for k, v in buckets.items() if k != "api")
     total = stats.total_cost()
-    print(f"  | {'Total':<24} {'':12} {stats.total_exchanges:>3}"
-          f" {_fmt_cost(total):>8} {'':>6} {'':>6}"
-          f" {_fmt_time(elapsed):>7} {'':>3} |")
-    print(f"  |   Real API: {_fmt_cost(api):<10}"
-          f"  Subscription: {_fmt_cost(sub):<10}"
-          f"  Wall: {_fmt_time(elapsed):<25}|")
+    print(
+        f"  | {'Total':<24} {'':12} {stats.total_exchanges:>3}"
+        f" {_fmt_cost(total):>8} {'':>6} {'':>6}"
+        f" {_fmt_time(elapsed):>7} {'':>3} |"
+    )
+    print(
+        f"  |   Real API: {_fmt_cost(api):<10}"
+        f"  Subscription: {_fmt_cost(sub):<10}"
+        f"  Wall: {_fmt_time(elapsed):<25}|"
+    )
     print(f"  {sep}\n")
 
 
@@ -228,6 +244,7 @@ def get_run_id() -> str | None:
 # ---------------------------------------------------------------------------
 # JSONL log parsing for resume support
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class RunState:

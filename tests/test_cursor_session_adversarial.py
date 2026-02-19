@@ -20,6 +20,7 @@ def test_no_result_message_returns_empty_text(tmp_path: Path):
         proc = MockCursorProcess(cmd, result_text="", chat_id="c1", **kwargs)
         # Replace stdout with only non-result messages
         import io
+
         messages = [
             json.dumps({"type": "progress", "message": "working..."}),
             json.dumps({"type": "status", "chatId": "c1"}),
@@ -41,6 +42,7 @@ def test_empty_stdout_no_crash(tmp_path: Path):
 
     def factory(cmd, **kwargs):
         import io
+
         proc = MockCursorProcess(cmd, result_text="", chat_id="c1", **kwargs)
         proc.stdout = io.StringIO("")
         return proc
@@ -61,6 +63,7 @@ def test_chat_id_from_alternate_keys(tmp_path: Path):
 
         def factory(cmd, key=key, **kwargs):
             import io
+
             messages = [
                 json.dumps({"type": "result", "result": "ok", key: f"id-{key}"}),
             ]

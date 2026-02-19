@@ -89,7 +89,9 @@ def _build_tools(
                         agent_name=agent_name,
                     )
                 except Exception as exc:
-                    error_msg = f"[ERROR] {agent_name} crashed: {type(exc).__name__}: {exc}"
+                    error_msg = (
+                        f"[ERROR] {agent_name} crashed: {type(exc).__name__}: {exc}"
+                    )
                     log.emit("agent_crash", agent=agent_name, error=str(exc))
                     log.tprint(error_msg)
                     return error_msg
@@ -145,7 +147,9 @@ def _build_tools(
             done_signal.success = False
             return "Acknowledged (marked as unsuccessful)."
 
-        rejection = verify_done(goal, summary, team, project_dir, state=verification_state)
+        rejection = verify_done(
+            goal, summary, team, project_dir, state=verification_state
+        )
         if rejection:
             log.emit("orchestrator_done_rejected", rejection=rejection[:5000])
             log.tprint("[done] REJECTED — verification found issues")
@@ -217,7 +221,9 @@ class ApiOrchestrator(OrchestratorBase):
     ) -> CycleResult:
         done_signal = _DoneSignal()
         verification_state = VerificationState()
-        tools = _build_tools(team, project_dir, self._summarizer, done_signal, goal, verification_state)
+        tools = _build_tools(
+            team, project_dir, self._summarizer, done_signal, goal, verification_state
+        )
         result = CycleResult()
 
         prompt = f"# Goal\n\n{goal}\n\nProject directory: {project_dir}"
@@ -273,8 +279,14 @@ class ApiOrchestrator(OrchestratorBase):
                 if exc.status_code != 529:
                     raise
                 if self._fallback_pydantic and attempt == 0:
-                    log.tprint(f"[orchestrator] 529 on {self.model}, falling back to {self._fallback_model}")
-                    log.emit("orchestrator_fallback", primary=self.model, fallback=self._fallback_model)
+                    log.tprint(
+                        f"[orchestrator] 529 on {self.model}, falling back to {self._fallback_model}"
+                    )
+                    log.emit(
+                        "orchestrator_fallback",
+                        primary=self.model,
+                        fallback=self._fallback_model,
+                    )
                     agent = Agent(
                         self._fallback_pydantic,
                         system_prompt=self._system_prompt,
@@ -284,7 +296,12 @@ class ApiOrchestrator(OrchestratorBase):
                 elif attempt < max_retries - 1:
                     wait = 30 * (attempt + 1)
                     log.tprint(f"[orchestrator] 529 overloaded, retrying in {wait}s...")
-                    log.emit("orchestrator_retry", status_code=529, attempt=attempt + 1, wait_s=wait)
+                    log.emit(
+                        "orchestrator_retry",
+                        status_code=529,
+                        attempt=attempt + 1,
+                        wait_s=wait,
+                    )
                     time.sleep(wait)
                 else:
                     raise

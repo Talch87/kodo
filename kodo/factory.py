@@ -24,6 +24,7 @@ from kodo.orchestrators.base import ORCHESTRATOR_SYSTEM_PROMPT, TeamConfig
 # Backend availability detection
 # ---------------------------------------------------------------------------
 
+
 @lru_cache(maxsize=1)
 def available_backends() -> dict[str, bool]:
     """Detect which worker backends are installed and on PATH."""
@@ -45,6 +46,7 @@ def has_cursor() -> bool:
 # Mode
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class Mode:
     """Bundles a team composition, orchestrator prompt, and default params."""
@@ -60,6 +62,7 @@ class Mode:
 # ---------------------------------------------------------------------------
 # Team builders
 # ---------------------------------------------------------------------------
+
 
 def _build_team_saga(
     budget: float | None = None,
@@ -158,8 +161,11 @@ def _build_team_saga(
         )
 
         architect_session = make_session(
-            "claude", "opus", None,
-            system_prompt=ARCHITECT_PROMPT, fallback_model="sonnet",
+            "claude",
+            "opus",
+            None,
+            system_prompt=ARCHITECT_PROMPT,
+            fallback_model="sonnet",
         )
         team["architect"] = Agent(
             architect_session,
@@ -208,7 +214,10 @@ def _build_team_mission(budget: float | None = None) -> TeamConfig:
 
     if _has_claude:
         worker_smart_session = make_session(
-            "claude", "opus", None, fallback_model="sonnet",
+            "claude",
+            "opus",
+            None,
+            fallback_model="sonnet",
         )
         team["worker_smart"] = Agent(
             worker_smart_session,
@@ -235,6 +244,7 @@ def _build_team_mission(budget: float | None = None) -> TeamConfig:
 # Mission orchestrator prompt
 # ---------------------------------------------------------------------------
 
+
 def _mission_system_prompt() -> str:
     """Build the mission system prompt based on available backends."""
     _has_cursor = has_cursor()
@@ -247,9 +257,7 @@ def _mission_system_prompt() -> str:
             "worker for complex reasoning or when the fast worker struggles."
         )
     elif _has_cursor:
-        workers_desc = (
-            "You have a fast worker (Cursor). Use it for all coding tasks."
-        )
+        workers_desc = "You have a fast worker (Cursor). Use it for all coding tasks."
     else:
         workers_desc = (
             "You have a smart worker (Claude Code). Use it for all coding tasks."
@@ -277,6 +285,7 @@ The workers are skilled coders — focus on WHAT and WHY, not HOW."""
 # ---------------------------------------------------------------------------
 # Mode registry
 # ---------------------------------------------------------------------------
+
 
 def _describe_backends() -> str:
     """Human-readable summary of available backends for mode descriptions."""
@@ -373,10 +382,14 @@ def build_orchestrator(
 
         orch_model = _MODEL_ALIASES.get(model, model) if model else "claude-opus-4-6"
         fb_model = (
-            _MODEL_ALIASES.get(fallback_model, fallback_model) if fallback_model else None
+            _MODEL_ALIASES.get(fallback_model, fallback_model)
+            if fallback_model
+            else None
         )
         return ApiOrchestrator(
-            model=orch_model, system_prompt=system_prompt, fallback_model=fb_model,
+            model=orch_model,
+            system_prompt=system_prompt,
+            fallback_model=fb_model,
         )
 
     from kodo.orchestrators.claude_code import ClaudeCodeOrchestrator

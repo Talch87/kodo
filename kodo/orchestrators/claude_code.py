@@ -65,7 +65,9 @@ def _build_mcp_server(
                         agent_name=agent_name,
                     )
                 except Exception as exc:
-                    error_msg = f"[ERROR] {agent_name} crashed: {type(exc).__name__}: {exc}"
+                    error_msg = (
+                        f"[ERROR] {agent_name} crashed: {type(exc).__name__}: {exc}"
+                    )
                     log.emit("agent_crash", agent=agent_name, error=str(exc))
                     log.tprint(error_msg)
                     return error_msg
@@ -124,7 +126,9 @@ if the tester or architect find issues, the call is rejected and you must fix th
             done_signal.success = False
             return "Acknowledged (marked as unsuccessful)."
 
-        rejection = verify_done(goal, summary, team, project_dir, state=verification_state)
+        rejection = verify_done(
+            goal, summary, team, project_dir, state=verification_state
+        )
         if rejection:
             log.emit(
                 "orchestrator_done_rejected",
@@ -180,7 +184,9 @@ class ClaudeCodeOrchestrator(OrchestratorBase):
 
         done_signal = _DoneSignal()
         verification_state = VerificationState()
-        mcp = _build_mcp_server(team, project_dir, self._summarizer, done_signal, goal, verification_state)
+        mcp = _build_mcp_server(
+            team, project_dir, self._summarizer, done_signal, goal, verification_state
+        )
 
         options = ClaudeAgentOptions(
             permission_mode="bypassPermissions",

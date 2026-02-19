@@ -8,7 +8,6 @@ from pathlib import Path
 from types import ModuleType
 from unittest.mock import patch
 
-import pytest
 
 from kodo import log
 from kodo.sessions.claude import ClaudeSession, _extract_tokens
@@ -34,13 +33,20 @@ def _install_mock_sdk(responses=None):
     fake_types.PermissionResultAllow = MockPermissionResultAllow
     fake_types.PermissionResultDeny = MockPermissionResultDeny
 
-    return mock_client, {"claude_agent_sdk": fake_mod, "claude_agent_sdk.types": fake_types}
+    return mock_client, {
+        "claude_agent_sdk": fake_mod,
+        "claude_agent_sdk.types": fake_types,
+    }
 
 
 def test_query_returns_result(tmp_path: Path):
     log.init(tmp_path, run_id="claude_query")
-    resp = MockResultMessage(result="Hello world", num_turns=2, total_cost_usd=0.05,
-                             usage={"input_tokens": 200, "output_tokens": 100})
+    resp = MockResultMessage(
+        result="Hello world",
+        num_turns=2,
+        total_cost_usd=0.05,
+        usage={"input_tokens": 200, "output_tokens": 100},
+    )
     mock_client, fake_modules = _install_mock_sdk(responses=[resp])
 
     with patch.dict(sys.modules, fake_modules):
@@ -61,10 +67,16 @@ def test_query_returns_result(tmp_path: Path):
 
 def test_stats_accumulate(tmp_path: Path):
     log.init(tmp_path, run_id="claude_stats")
-    r1 = MockResultMessage(result="r1", total_cost_usd=0.01,
-                           usage={"input_tokens": 100, "output_tokens": 50})
-    r2 = MockResultMessage(result="r2", total_cost_usd=0.02,
-                           usage={"input_tokens": 200, "output_tokens": 80})
+    r1 = MockResultMessage(
+        result="r1",
+        total_cost_usd=0.01,
+        usage={"input_tokens": 100, "output_tokens": 50},
+    )
+    r2 = MockResultMessage(
+        result="r2",
+        total_cost_usd=0.02,
+        usage={"input_tokens": 200, "output_tokens": 80},
+    )
 
     # We need two separate clients for two queries since _ensure_client caches
     call_count = [0]
@@ -83,10 +95,13 @@ def test_stats_accumulate(tmp_path: Path):
     fake_types.PermissionResultAllow = MockPermissionResultAllow
     fake_types.PermissionResultDeny = MockPermissionResultDeny
 
-    with patch.dict(sys.modules, {
-        "claude_agent_sdk": fake_mod,
-        "claude_agent_sdk.types": fake_types,
-    }):
+    with patch.dict(
+        sys.modules,
+        {
+            "claude_agent_sdk": fake_mod,
+            "claude_agent_sdk.types": fake_types,
+        },
+    ):
         session = ClaudeSession(model="sonnet", use_api_key=True)
         try:
             session.query("q1", tmp_path, max_turns=10)
@@ -149,10 +164,13 @@ def test_api_key_stripped_by_default(tmp_path: Path, monkeypatch):
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-secret")
 
-    with patch.dict(sys.modules, {
-        "claude_agent_sdk": fake_mod,
-        "claude_agent_sdk.types": fake_types,
-    }):
+    with patch.dict(
+        sys.modules,
+        {
+            "claude_agent_sdk": fake_mod,
+            "claude_agent_sdk.types": fake_types,
+        },
+    ):
         session = ClaudeSession(model="sonnet", use_api_key=False)
         try:
             session.query("q", tmp_path, max_turns=10)
@@ -187,10 +205,13 @@ def test_api_key_kept_when_explicit(tmp_path: Path, monkeypatch):
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-secret")
 
-    with patch.dict(sys.modules, {
-        "claude_agent_sdk": fake_mod,
-        "claude_agent_sdk.types": fake_types,
-    }):
+    with patch.dict(
+        sys.modules,
+        {
+            "claude_agent_sdk": fake_mod,
+            "claude_agent_sdk.types": fake_types,
+        },
+    ):
         session = ClaudeSession(model="sonnet", use_api_key=True)
         try:
             session.query("q", tmp_path, max_turns=10)

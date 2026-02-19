@@ -9,6 +9,7 @@ from kodo import log
 from kodo.orchestrators.api import ApiOrchestrator, _messages_to_text
 from tests.conftest import FakeRunResult
 
+
 def test_cycle_done_returns_finished(tmp_path: Path):
     log.init(tmp_path, run_id="api_done")
 
@@ -29,8 +30,10 @@ def test_cycle_done_returns_finished(tmp_path: Path):
 
     team = _make_fake_team()
 
-    with patch("kodo.orchestrators.api.Agent.__init__", fake_agent_init), \
-         patch("kodo.orchestrators.api.verify_done", return_value=None):
+    with (
+        patch("kodo.orchestrators.api.Agent.__init__", fake_agent_init),
+        patch("kodo.orchestrators.api.verify_done", return_value=None),
+    ):
         orch = ApiOrchestrator(model="claude-opus-4-6")
         result = orch.cycle("build feature", tmp_path, team, max_exchanges=10)
 
@@ -49,8 +52,10 @@ def test_cycle_no_done_returns_summary(tmp_path: Path):
 
     team = _make_fake_team()
 
-    with patch("kodo.orchestrators.api.Agent.__init__", fake_agent_init), \
-         patch.object(ApiOrchestrator, "_summarize", return_value="summary of work"):
+    with (
+        patch("kodo.orchestrators.api.Agent.__init__", fake_agent_init),
+        patch.object(ApiOrchestrator, "_summarize", return_value="summary of work"),
+    ):
         orch = ApiOrchestrator(model="claude-opus-4-6")
         result = orch.cycle("build feature", tmp_path, team, max_exchanges=10)
 
@@ -65,6 +70,7 @@ def test_usage_limit_exceeded(tmp_path: Path):
     def fake_agent_init(self, model, *, system_prompt=None, tools=None, **kwargs):
         def fake_run_sync(prompt, *, usage_limits=None):
             raise UsageLimitExceeded("limit hit")
+
         self.run_sync = fake_run_sync
 
     team = _make_fake_team()
@@ -87,14 +93,19 @@ def test_529_fallback(tmp_path: Path):
             nonlocal call_count
             call_count[0] += 1
             if call_count[0] == 1:
-                raise ModelHTTPError(status_code=529, model_name="test", body="overloaded")
+                raise ModelHTTPError(
+                    status_code=529, model_name="test", body="overloaded"
+                )
             return FakeRunResult()
+
         self.run_sync = fake_run_sync
 
     team = _make_fake_team()
 
-    with patch("kodo.orchestrators.api.Agent.__init__", fake_agent_init), \
-         patch.object(ApiOrchestrator, "_summarize", return_value="done"):
+    with (
+        patch("kodo.orchestrators.api.Agent.__init__", fake_agent_init),
+        patch.object(ApiOrchestrator, "_summarize", return_value="done"),
+    ):
         orch = ApiOrchestrator(
             model="claude-opus-4-6",
             fallback_model="claude-sonnet-4-5-20250929",
@@ -111,13 +122,13 @@ def test_messages_to_text():
         ModelRequest,
         ModelResponse,
         TextPart,
-        ToolCallPart,
-        ToolReturnPart,
         UserPromptPart,
     )
 
     messages = [
-        ModelRequest(parts=[UserPromptPart(content="hello", timestamp="2024-01-01T00:00:00Z")]),
+        ModelRequest(
+            parts=[UserPromptPart(content="hello", timestamp="2024-01-01T00:00:00Z")]
+        ),
         ModelResponse(
             parts=[TextPart(part_kind="text", content="hi there")],
             model_name="test",
@@ -130,6 +141,7 @@ def test_messages_to_text():
 
 
 # ── shared helpers ───────────────────────────────────────────────────────
+
 
 def _make_fake_team():
     """Create a minimal fake TeamConfig for orchestrator tests."""

@@ -21,7 +21,8 @@ from kodo.orchestrators.base import ResumeState
 
 def _print_banner() -> None:
     print(f"\n  kodo v{__version__} — autonomous multi-agent coding")
-    print(f"  https://github.com/ikamen/kodo\n")
+    print("  https://github.com/ikamen/kodo\n")
+
 
 INTAKE_PROMPT = """\
 You are a project intake interviewer. The user has provided a high-level goal \
@@ -246,10 +247,14 @@ def select_params() -> dict:
             ],
         ).split(" (")[0]
 
-    print("\n  An exchange = one orchestrator turn: think, delegate to agent, read result.")
+    print(
+        "\n  An exchange = one orchestrator turn: think, delegate to agent, read result."
+    )
     exchange_presets = ["20", "30", "50"]
     default_ex = str(mode.default_max_exchanges)
-    ex_default_idx = exchange_presets.index(default_ex) if default_ex in exchange_presets else 1
+    ex_default_idx = (
+        exchange_presets.index(default_ex) if default_ex in exchange_presets else 1
+    )
     max_exchanges = _select_numeric(
         "Max exchanges per cycle:", exchange_presets, default_index=ex_default_idx
     )
@@ -258,8 +263,12 @@ def select_params() -> dict:
     print("  a new cycle starts with a summary of prior progress.")
     cycle_presets = ["1", "3", "5", "10"]
     default_cy = str(mode.default_max_cycles)
-    cy_default_idx = cycle_presets.index(default_cy) if default_cy in cycle_presets else 2
-    max_cycles = _select_numeric("Max cycles:", cycle_presets, default_index=cy_default_idx)
+    cy_default_idx = (
+        cycle_presets.index(default_cy) if default_cy in cycle_presets else 2
+    )
+    max_cycles = _select_numeric(
+        "Max cycles:", cycle_presets, default_index=cy_default_idx
+    )
 
     print("\n  Budget per step limits spending on each agent call.")
     print("  Only matters for API-billed sessions; ignored on subscription.")
@@ -296,10 +305,14 @@ def _load_or_select_params(project_dir: Path) -> dict:
         try:
             prev = json.loads(cfg_path.read_text())
             mode = get_mode(prev["mode"])
-            print(f"\n  Previous config found:")
+            print("\n  Previous config found:")
             print(f"    Mode:         {mode.name} — {mode.description}")
-            print(f"    Orchestrator: {prev['orchestrator']} ({prev['orchestrator_model']})")
-            print(f"    Exchanges:    {prev['max_exchanges']}/cycle, {prev['max_cycles']} cycles")
+            print(
+                f"    Orchestrator: {prev['orchestrator']} ({prev['orchestrator_model']})"
+            )
+            print(
+                f"    Exchanges:    {prev['max_exchanges']}/cycle, {prev['max_cycles']} cycles"
+            )
             if prev.get("budget_per_step"):
                 print(f"    Budget/step:  ${prev['budget_per_step']:.2f}")
             reuse = input("\n  Reuse this config? [Y/n] ").strip().lower()
@@ -426,9 +439,7 @@ def _main_inner() -> None:
     parser = argparse.ArgumentParser(
         description="kodo — autonomous multi-agent coding",
     )
-    parser.add_argument(
-        "--version", action="version", version=f"kodo {__version__}"
-    )
+    parser.add_argument("--version", action="version", version=f"kodo {__version__}")
     parser.add_argument(
         "--resume",
         nargs="?",
@@ -519,7 +530,9 @@ def _main_inner() -> None:
     print(f"  Goal:         {goal_text[:80]}{'...' if len(goal_text) > 80 else ''}")
     print(f"  Mode:         {mode.name} — {mode.description}")
     print(f"  Orchestrator: {params['orchestrator']} ({params['orchestrator_model']})")
-    print(f"  Exchanges:    {params['max_exchanges']}/cycle, {params['max_cycles']} cycles")
+    print(
+        f"  Exchanges:    {params['max_exchanges']}/cycle, {params['max_cycles']} cycles"
+    )
     if params["budget_per_step"]:
         print(f"  Budget/step:  ${params['budget_per_step']:.2f}")
     print()
