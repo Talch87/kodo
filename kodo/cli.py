@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from simple_term_menu import TerminalMenu
+import questionary
 
 from kodo import log, __version__
 from kodo.factory import MODES, get_mode, build_orchestrator, has_claude, has_cursor, check_api_key
@@ -314,16 +314,12 @@ def _load_goal_plan(project_dir: Path) -> GoalPlan | None:
 
 def _select_one(title: str, options: list[str], default_index: int = 0) -> str:
     """Arrow-key single selection. Returns the chosen string."""
-    menu = TerminalMenu(
-        options,
-        title=title,
-        cursor_index=default_index,
-    )
-    idx = menu.show()
-    if idx is None:
+    default = options[default_index] if default_index < len(options) else None
+    result = questionary.select(title, choices=options, default=default).ask()
+    if result is None:
         print("Cancelled.")
         sys.exit(1)
-    return options[idx]
+    return result
 
 
 def _select_numeric(
@@ -331,19 +327,19 @@ def _select_numeric(
 ) -> str:
     """Arrow-key selection with a 'Custom...' option for numeric values."""
     choices = presets + ["Custom..."]
-    menu = TerminalMenu(
-        choices,
-        title=title,
-        cursor_index=default_index,
-    )
-    idx = menu.show()
-    if idx is None:
+    default = choices[default_index] if default_index < len(choices) else None
+    result = questionary.select(title, choices=choices, default=default).ask()
+    if result is None:
         print("Cancelled.")
         sys.exit(1)
-    if choices[idx] != "Custom...":
-        return choices[idx]
+    if result != "Custom...":
+        return result
     while True:
-        raw = input("  Enter value: ").strip()
+        raw = questionary.text("  Enter value:").ask()
+        if raw is None:
+            print("Cancelled.")
+            sys.exit(1)
+        raw = raw.strip()
         try:
             type_fn(raw)
             return raw

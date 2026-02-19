@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -104,7 +104,7 @@ class Agent:
                 )
                 try:
                     query_result = future.result(timeout=self.timeout_s)
-                except TimeoutError:
+                except FuturesTimeoutError:
                     log.emit("agent_timeout", agent=label, timeout_s=self.timeout_s)
                     # Kill the underlying session to stop burning tokens.
                     self.session.reset()

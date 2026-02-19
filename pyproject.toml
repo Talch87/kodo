@@ -1,12 +1,12 @@
 [project]
 name = "kodo"
-version = "0.4.5"
+version = "0.4.6"
 requires-python = ">=3.10"
 dependencies = [
     "claude-agent-sdk>=0.1.36",
     "mcp>=1.0",
     "python-dotenv>=1.0",
-    "simple-term-menu>=1.6",
+    "questionary>=2.0",
     "pydantic-ai>=1.0",
     "summarization-pydantic-ai>=0.0.3",
 ]
