@@ -1494,7 +1494,7 @@ wheels = [
 
 [[package]]
 name = "kodo"
-version = "0.4.6"
+version = "0.4.8"
 source = { virtual = "." }
 dependencies = [
     { name = "claude-agent-sdk" },
@@ -1510,11 +1510,6 @@ test = [
     { name = "pytest" },
 ]
 
-[package.dev-dependencies]
-dev = [
-    { name = "playwright" },
-]
-
 [package.metadata]
 requires-dist = [
     { name = "claude-agent-sdk", specifier = ">=0.1.36" },
@@ -1526,9 +1521,6 @@ requires-dist = [
     { name = "summarization-pydantic-ai", specifier = ">=0.0.3" },
 ]
 provides-extras = ["test"]
-
-[package.metadata.requires-dev]
-dev = [{ name = "playwright", specifier = ">=1.58.0" }]
 
 [[package]]
 name = "logfire"

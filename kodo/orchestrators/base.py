@@ -22,6 +22,7 @@ class GoalStage:
     name: str  # short label
     description: str  # full prose for orchestrator
     acceptance_criteria: str  # verifiable "done" definition
+    browser_testing: bool = False  # whether this stage needs browser verification
 
 
 @dataclass
@@ -161,6 +162,31 @@ def build_team_tools(team: TeamConfig) -> list[dict]:
     return tools
 
 
+# Verification signal strings — used in agent prompts and _check_passed()
+PASS_SIGNAL = "ALL CHECKS PASS"
+MINOR_SIGNAL = "MINOR ISSUES FIXED"
+
+
+class DoneSignal:
+    """Shared mutable to communicate between the ``done`` tool and the cycle loop."""
+
+    def __init__(self) -> None:
+        self.called = False
+        self.summary = ""
+        self.success = False
+
+
+def build_cycle_prompt(goal: str, project_dir: Path, prior_summary: str = "") -> str:
+    """Build the user-turn prompt sent to the orchestrator each cycle."""
+    prompt = f"# Goal\n\n{goal}\n\nProject directory: {project_dir}"
+    if prior_summary:
+        prompt += (
+            f"\n\n# Previous progress\n\n{prior_summary}"
+            "\n\nContinue working toward the goal."
+        )
+    return prompt
+
+
 @dataclass
 class VerificationState:
     """Tracks verification attempts within a single cycle.
@@ -176,7 +202,7 @@ class VerificationState:
 def _check_passed(report: str) -> bool:
     """Return True if a verifier report signals acceptance."""
     upper = report.upper()
-    return "ALL CHECKS PASS" in upper or "MINOR ISSUES FIXED" in upper
+    return PASS_SIGNAL in upper or MINOR_SIGNAL in upper
 
 
 def verify_done(
@@ -186,10 +212,13 @@ def verify_done(
     project_dir: Path,
     *,
     state: VerificationState | None = None,
+    browser_testing: bool = False,
 ) -> str | None:
     """Run tester + architect to verify the goal is met.
 
     Returns None if all checks pass, or a rejection message with issues found.
+    *browser_testing*: when False, ``tester_browser`` is skipped even if present
+    in the team.
     """
     from kodo import log
 
@@ -207,12 +236,14 @@ def verify_done(
         f"# Orchestrator's summary\n{summary}\n\n"
     )
 
-    # Collect tester agents — run all that exist
+    # Collect tester agents — include tester_browser only when requested
     tester_agents: list[tuple[str, Agent]] = []
     if team.get("tester"):
         tester_agents.append(("tester", team["tester"]))
-    if team.get("tester_browser"):
+    if team.get("tester_browser") and browser_testing:
         tester_agents.append(("tester_browser", team["tester_browser"]))
+    elif team.get("tester_browser") and not browser_testing:
+        log.tprint("[done] skipping tester_browser (not needed for this stage)")
 
     for tester_name, tester_agent in tester_agents:
         try:
@@ -263,7 +294,11 @@ def verify_done(
             issues.append(f"**Architect crashed:** {exc}")
 
     # Fallback: if no dedicated verifiers exist, use a worker in a fresh session
-    has_dedicated_verifiers = bool(tester_agents) or architect_agent is not None
+    has_dedicated_verifiers = (
+        bool(tester_agents)
+        or team.get("tester_browser") is not None  # exists even if skipped
+        or architect_agent is not None
+    )
     if not has_dedicated_verifiers:
         # Prefer worker_smart, fall back to any worker
         verifier = (
@@ -339,8 +374,7 @@ def compose_stage_goal(
 
     # Current stage
     parts.append(
-        f"# Current Stage ({stage.index}/{total}): {stage.name}\n"
-        f"{stage.description}"
+        f"# Current Stage ({stage.index}/{total}): {stage.name}\n{stage.description}"
     )
     if stage.acceptance_criteria:
         parts.append(f"## Acceptance Criteria\n{stage.acceptance_criteria}")
@@ -378,6 +412,7 @@ class Orchestrator(Protocol):
         *,
         max_exchanges: int = 30,
         prior_summary: str = "",
+        browser_testing: bool = False,
     ) -> CycleResult:
         """Run one cycle of orchestrated work."""
         ...
@@ -416,6 +451,7 @@ class OrchestratorBase:
         *,
         max_exchanges: int = 30,
         prior_summary: str = "",
+        browser_testing: bool = False,
     ) -> CycleResult:
         raise NotImplementedError
 
@@ -468,14 +504,21 @@ class OrchestratorBase:
         try:
             if plan and plan.stages:
                 self._run_staged(
-                    goal, project_dir, team, plan, result,
+                    goal,
+                    project_dir,
+                    team,
+                    plan,
+                    result,
                     max_exchanges=max_exchanges,
                     max_cycles=max_cycles,
                     resume=resume,
                 )
             else:
                 self._run_single(
-                    goal, project_dir, team, result,
+                    goal,
+                    project_dir,
+                    team,
+                    result,
                     max_exchanges=max_exchanges,
                     max_cycles=max_cycles,
                     start_cycle=start_cycle,
@@ -624,6 +667,7 @@ class OrchestratorBase:
                     team,
                     max_exchanges=max_exchanges,
                     prior_summary=prior_summary,
+                    browser_testing=stage.browser_testing,
                 )
                 cycle_result.stage_index = stage.index
                 result.cycles.append(cycle_result)
@@ -670,7 +714,5 @@ class OrchestratorBase:
 
             if not stage_finished:
                 # Stage failed or budget exhausted — stop the run
-                log.tprint(
-                    "[orchestrator] Stopping run — stage did not complete"
-                )
+                log.tprint("[orchestrator] Stopping run — stage did not complete")
                 break

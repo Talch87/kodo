@@ -23,9 +23,11 @@ from kodo.summarizer import Summarizer
 from kodo.orchestrators.base import (
     ORCHESTRATOR_SYSTEM_PROMPT,
     CycleResult,
+    DoneSignal,
     OrchestratorBase,
     TeamConfig,
     VerificationState,
+    build_cycle_prompt,
     verify_done,
 )
 
@@ -46,22 +48,14 @@ _PYDANTIC_MODEL_MAP: dict[str, str] = {
 }
 
 
-class _DoneSignal:
-    """Shared mutable to communicate between the `done` tool and the cycle."""
-
-    def __init__(self) -> None:
-        self.called = False
-        self.summary = ""
-        self.success = False
-
-
 def _build_tools(
     team: TeamConfig,
     project_dir: Path,
     summarizer: Summarizer,
-    done_signal: _DoneSignal,
+    done_signal: DoneSignal,
     goal: str,
     verification_state: VerificationState | None = None,
+    browser_testing: bool = False,
 ) -> list[Tool]:
     """Build pydantic-ai Tool objects for each team agent + the done tool."""
     tools: list[Tool] = []
@@ -148,7 +142,12 @@ def _build_tools(
             return "Acknowledged (marked as unsuccessful)."
 
         rejection = verify_done(
-            goal, summary, team, project_dir, state=verification_state
+            goal,
+            summary,
+            team,
+            project_dir,
+            state=verification_state,
+            browser_testing=browser_testing,
         )
         if rejection:
             log.emit("orchestrator_done_rejected", rejection=rejection[:5000])
@@ -218,20 +217,22 @@ class ApiOrchestrator(OrchestratorBase):
         *,
         max_exchanges: int = 30,
         prior_summary: str = "",
+        browser_testing: bool = False,
     ) -> CycleResult:
-        done_signal = _DoneSignal()
+        done_signal = DoneSignal()
         verification_state = VerificationState()
         tools = _build_tools(
-            team, project_dir, self._summarizer, done_signal, goal, verification_state
+            team,
+            project_dir,
+            self._summarizer,
+            done_signal,
+            goal,
+            verification_state,
+            browser_testing=browser_testing,
         )
         result = CycleResult()
 
-        prompt = f"# Goal\n\n{goal}\n\nProject directory: {project_dir}"
-        if prior_summary:
-            prompt += (
-                f"\n\n# Previous progress\n\n{prior_summary}"
-                "\n\nContinue working toward the goal."
-            )
+        prompt = build_cycle_prompt(goal, project_dir, prior_summary)
 
         log.emit(
             "cycle_start",

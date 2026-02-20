@@ -51,11 +51,15 @@ def check_api_key(orchestrator: str, model: str) -> str | None:
         return None
 
     _GEMINI_ALIASES = {
-        "gemini-pro", "gemini-flash",
-        "gemini-3-pro-preview", "gemini-3-flash-preview",
+        "gemini-pro",
+        "gemini-flash",
+        "gemini-3-pro-preview",
+        "gemini-3-flash-preview",
     }
     if model in _GEMINI_ALIASES or model.startswith("gemini"):
-        if not os.environ.get("GEMINI_API_KEY") and not os.environ.get("GOOGLE_API_KEY"):
+        if not os.environ.get("GEMINI_API_KEY") and not os.environ.get(
+            "GOOGLE_API_KEY"
+        ):
             return "GEMINI_API_KEY (or GOOGLE_API_KEY) not set — required for Gemini models"
     else:
         if not os.environ.get("ANTHROPIC_API_KEY"):
@@ -78,6 +82,45 @@ class Mode:
     build_team: Callable[[float | None], TeamConfig]
     default_max_exchanges: int
     default_max_cycles: int
+
+
+# ---------------------------------------------------------------------------
+# Shared agent descriptions (used by both saga and mission team builders)
+# ---------------------------------------------------------------------------
+
+_WORKER_COMMON = (
+    "It can read and navigate existing codebases, run tests, and execute git commands "
+    "on your behalf (commit, revert, branch, etc.).\n"
+    "Give it a SHORT directive (2-5 sentences) describing the desired behavior, "
+    "not the implementation — it is a skilled coder.\n"
+    "If it seems stuck or unproductive, set new_conversation=true and give "
+    "a clear, fresh directive. Don't repeat a failing directive more than twice.\n"
+    "If the result contains [Context was reset: ...], give enough context in your "
+    "next directive for the worker to continue effectively."
+)
+
+_WORKER_FAST_DESC = (
+    "A fast coding agent (Cursor) for straightforward implementation tasks.\n"
+    "Best for: writing new code, simple refactors, adding features with clear specs, "
+    "file edits, and any task where speed matters more than deep reasoning.\n"
+    + _WORKER_COMMON
+)
+
+_WORKER_SMART_DESC = (
+    "A powerful reasoning agent (Claude Code) for complex tasks requiring deep thinking.\n"
+    "Best for: debugging tricky issues, architectural decisions, complex refactors, "
+    "tasks requiring understanding of large codebases, and anything where the fast "
+    "worker struggled.\n" + _WORKER_COMMON
+)
+
+# Extra instructions only relevant in saga mode (with tester/architect)
+_WORKER_FAST_SAGA_EXTRA = "\nEach task should be ONE feature or change that can be built and tested independently."
+
+_WORKER_SMART_SAGA_EXTRA = (
+    "\nEach task should be ONE feature or change that can be built and tested independently.\n"
+    "If the result contains [PROPOSED PLAN], review it. If good, tell the worker: "
+    '"Plan approved, proceed with implementation." If you want changes, describe them.'
+)
 
 
 # ---------------------------------------------------------------------------
@@ -108,18 +151,7 @@ def _build_team_saga(
         worker_fast_session = make_session("cursor", "composer-1.5", budget)
         team["worker_fast"] = Agent(
             worker_fast_session,
-            "A fast coding agent (Cursor) for straightforward implementation tasks.\n"
-            "Best for: writing new code, simple refactors, adding features with clear specs, "
-            "file edits, and any task where speed matters more than deep reasoning.\n"
-            "It can read and navigate existing codebases, run tests, and execute git commands "
-            "on your behalf (commit, revert, branch, etc.).\n"
-            "Give it a SHORT directive (2-5 sentences) describing the desired behavior, "
-            "not the implementation — it is a skilled coder.\n"
-            "Each task should be ONE feature or change that can be built and tested independently.\n"
-            "If it seems stuck or unproductive, set new_conversation=true and give "
-            "a clear, fresh directive. Don't repeat a failing directive more than twice.\n"
-            "If the result contains [Context was reset: ...], give enough context in your "
-            "next directive for the worker to continue effectively.",
+            _WORKER_FAST_DESC + _WORKER_FAST_SAGA_EXTRA,
             max_turns=30,
             timeout_s=worker_timeout_s,
         )
@@ -163,21 +195,7 @@ def _build_team_saga(
         )
         team["worker_smart"] = Agent(
             worker_smart_session,
-            "A powerful reasoning agent (Claude Code) for complex tasks requiring deep thinking.\n"
-            "Best for: debugging tricky issues, architectural decisions, complex refactors, "
-            "tasks requiring understanding of large codebases, and anything where the fast "
-            "worker struggled.\n"
-            "It can read and navigate existing codebases, run tests, and execute git commands "
-            "on your behalf (commit, revert, branch, etc.).\n"
-            "Give it a SHORT directive (2-5 sentences) describing the desired behavior, "
-            "not the implementation — it is a skilled coder.\n"
-            "Each task should be ONE feature or change that can be built and tested independently.\n"
-            "If the result contains [PROPOSED PLAN], review it. If good, tell the worker: "
-            '"Plan approved, proceed with implementation." If you want changes, describe them.\n'
-            "If it seems stuck or unproductive, set new_conversation=true and give "
-            "a clear, fresh directive. Don't repeat a failing directive more than twice.\n"
-            "If the result contains [Context was reset: ...], give enough context in your "
-            "next directive for the worker to continue effectively.",
+            _WORKER_SMART_DESC + _WORKER_SMART_SAGA_EXTRA,
             max_turns=30,
             timeout_s=worker_timeout_s,
         )
@@ -239,17 +257,7 @@ def _build_team_mission(budget: float | None = None) -> TeamConfig:
         worker_fast_session = make_session("cursor", "composer-1.5", budget)
         team["worker_fast"] = Agent(
             worker_fast_session,
-            "A fast coding agent (Cursor) for straightforward implementation tasks.\n"
-            "Best for: writing new code, simple refactors, adding features with clear specs, "
-            "file edits, and any task where speed matters more than deep reasoning.\n"
-            "It can read and navigate existing codebases, run tests, and execute git commands "
-            "on your behalf (commit, revert, branch, etc.).\n"
-            "Give it a SHORT directive (2-5 sentences) describing the desired behavior, "
-            "not the implementation — it is a skilled coder.\n"
-            "If it seems stuck or unproductive, set new_conversation=true and give "
-            "a clear, fresh directive. Don't repeat a failing directive more than twice.\n"
-            "If the result contains [Context was reset: ...], give enough context in your "
-            "next directive for the worker to continue effectively.",
+            _WORKER_FAST_DESC,
             max_turns=30,
             timeout_s=1800,
         )
@@ -263,18 +271,7 @@ def _build_team_mission(budget: float | None = None) -> TeamConfig:
         )
         team["worker_smart"] = Agent(
             worker_smart_session,
-            "A powerful reasoning agent (Claude Code) for complex tasks requiring deep thinking.\n"
-            "Best for: debugging tricky issues, architectural decisions, complex refactors, "
-            "tasks requiring understanding of large codebases, and anything where the fast "
-            "worker struggled.\n"
-            "It can read and navigate existing codebases, run tests, and execute git commands "
-            "on your behalf (commit, revert, branch, etc.).\n"
-            "Give it a SHORT directive (2-5 sentences) describing the desired behavior, "
-            "not the implementation — it is a skilled coder.\n"
-            "If it seems stuck or unproductive, set new_conversation=true and give "
-            "a clear, fresh directive. Don't repeat a failing directive more than twice.\n"
-            "If the result contains [Context was reset: ...], give enough context in your "
-            "next directive for the worker to continue effectively.",
+            _WORKER_SMART_DESC,
             max_turns=30,
             timeout_s=1800,
         )

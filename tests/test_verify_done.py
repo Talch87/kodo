@@ -76,12 +76,12 @@ def test_single_verifier_in_team(tmp_project: Path, present_role) -> None:
 
 
 def test_tester_browser_used_when_no_tester(tmp_project: Path) -> None:
-    """tester_browser runs when tester is absent."""
+    """tester_browser runs when tester is absent and browser_testing=True."""
     team = {
         "tester_browser": make_agent("ALL CHECKS PASS"),
         "architect": make_agent("ALL CHECKS PASS"),
     }
-    assert verify_done(GOAL, SUMMARY, team, tmp_project) is None
+    assert verify_done(GOAL, SUMMARY, team, tmp_project, browser_testing=True) is None
 
 
 def test_tester_browser_fails(tmp_project: Path) -> None:
@@ -90,7 +90,7 @@ def test_tester_browser_fails(tmp_project: Path) -> None:
         "tester_browser": make_agent("Page returns 404"),
         "architect": make_agent("ALL CHECKS PASS"),
     }
-    result = verify_done(GOAL, SUMMARY, team, tmp_project)
+    result = verify_done(GOAL, SUMMARY, team, tmp_project, browser_testing=True)
     assert result is not None
     assert "Page returns 404" in result
 
@@ -102,7 +102,7 @@ def test_both_testers_run_when_both_exist(tmp_project: Path) -> None:
         "tester_browser": make_agent("Button click does nothing"),
         "architect": make_agent("ALL CHECKS PASS"),
     }
-    result = verify_done(GOAL, SUMMARY, team, tmp_project)
+    result = verify_done(GOAL, SUMMARY, team, tmp_project, browser_testing=True)
     assert result is not None
     assert "tester_browser found issues" in result
     assert "Button click" in result
@@ -115,7 +115,7 @@ def test_both_testers_pass(tmp_project: Path) -> None:
         "tester_browser": make_agent("ALL CHECKS PASS"),
         "architect": make_agent("ALL CHECKS PASS"),
     }
-    assert verify_done(GOAL, SUMMARY, team, tmp_project) is None
+    assert verify_done(GOAL, SUMMARY, team, tmp_project, browser_testing=True) is None
 
 
 def test_empty_team(tmp_project: Path) -> None:
@@ -254,3 +254,44 @@ def test_attempt_count_in_rejection(tmp_project: Path) -> None:
     result2 = verify_done(GOAL, SUMMARY, team, tmp_project, state=state)
     assert result2 is not None
     assert "attempt 2" in result2
+
+
+# --- Conditional browser testing tests ---
+
+
+def test_browser_skipped_by_default(tmp_project: Path) -> None:
+    """browser_testing defaults to False, so tester_browser is skipped."""
+    tester_browser = make_agent("ALL CHECKS PASS")
+    team = {
+        "tester": make_agent("ALL CHECKS PASS"),
+        "tester_browser": tester_browser,
+        "architect": make_agent("ALL CHECKS PASS"),
+    }
+    result = verify_done(GOAL, SUMMARY, team, tmp_project)
+    assert result is None
+    assert tester_browser.session.stats.queries == 0
+
+
+def test_browser_runs_when_flag_true(tmp_project: Path) -> None:
+    """When browser_testing=True, tester_browser runs."""
+    tester_browser = make_agent("ALL CHECKS PASS")
+    team = {
+        "tester": make_agent("ALL CHECKS PASS"),
+        "tester_browser": tester_browser,
+        "architect": make_agent("ALL CHECKS PASS"),
+    }
+    result = verify_done(GOAL, SUMMARY, team, tmp_project, browser_testing=True)
+    assert result is None
+    assert tester_browser.session.stats.queries == 1
+
+
+def test_browser_flag_false_skips_even_with_agent(tmp_project: Path) -> None:
+    """browser_testing=False skips tester_browser even when the agent exists."""
+    tester_browser = make_agent("ALL CHECKS PASS")
+    team = {
+        "tester": make_agent("ALL CHECKS PASS"),
+        "tester_browser": tester_browser,
+    }
+    result = verify_done(GOAL, SUMMARY, team, tmp_project, browser_testing=False)
+    assert result is None
+    assert tester_browser.session.stats.queries == 0
