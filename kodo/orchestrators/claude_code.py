@@ -11,29 +11,23 @@ from kodo.summarizer import Summarizer
 from kodo.orchestrators.base import (
     ORCHESTRATOR_SYSTEM_PROMPT,
     CycleResult,
+    DoneSignal,
     OrchestratorBase,
     TeamConfig,
     VerificationState,
+    build_cycle_prompt,
     verify_done,
 )
-
-
-class _DoneSignal:
-    """Shared mutable to communicate between the `done` MCP tool and the cycle."""
-
-    def __init__(self):
-        self.called = False
-        self.summary = ""
-        self.success = False
 
 
 def _build_mcp_server(
     team: TeamConfig,
     project_dir: Path,
     summarizer: Summarizer,
-    done_signal: _DoneSignal,
+    done_signal: DoneSignal,
     goal: str,
     verification_state: VerificationState | None = None,
+    browser_testing: bool = False,
 ):
     """Build a FastMCP server exposing each team agent as a tool."""
     from mcp.server.fastmcp import FastMCP
@@ -128,7 +122,12 @@ if the tester or architect find issues, the call is rejected and you must fix th
             return "Acknowledged (marked as unsuccessful)."
 
         rejection = verify_done(
-            goal, summary, team, project_dir, state=verification_state
+            goal,
+            summary,
+            team,
+            project_dir,
+            state=verification_state,
+            browser_testing=browser_testing,
         )
         if rejection:
             log.emit(
@@ -169,6 +168,7 @@ class ClaudeCodeOrchestrator(OrchestratorBase):
         *,
         max_exchanges: int = 30,
         prior_summary: str = "",
+        browser_testing: bool = False,
     ) -> CycleResult:
         from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient, ResultMessage
 
@@ -183,10 +183,16 @@ class ClaudeCodeOrchestrator(OrchestratorBase):
             prior_summary=prior_summary or None,
         )
 
-        done_signal = _DoneSignal()
+        done_signal = DoneSignal()
         verification_state = VerificationState()
         mcp = _build_mcp_server(
-            team, project_dir, self._summarizer, done_signal, goal, verification_state
+            team,
+            project_dir,
+            self._summarizer,
+            done_signal,
+            goal,
+            verification_state,
+            browser_testing=browser_testing,
         )
 
         options = ClaudeAgentOptions(
@@ -209,9 +215,7 @@ class ClaudeCodeOrchestrator(OrchestratorBase):
 
         result = CycleResult()
 
-        prompt = f"# Goal\n\n{goal}\n\nProject directory: {project_dir}"
-        if prior_summary:
-            prompt += f"\n\n# Previous progress\n\n{prior_summary}\n\nContinue working toward the goal."
+        prompt = build_cycle_prompt(goal, project_dir, prior_summary)
 
         # Run the entire connect→query→collect→disconnect lifecycle in a single
         # async function on a fresh event loop so anyio cancel scopes stay in

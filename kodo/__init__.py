@@ -1,6 +1,6 @@
 """kodo — autonomous goal-driven coding agent."""
 
-__version__ = "0.4.7"
+__version__ = "0.4.8"
 
 from kodo import log
 from kodo.agent import Agent, AgentResult
@@ -14,29 +14,32 @@ from kodo.orchestrators.base import (
 )
 
 # ---------------------------------------------------------------------------
-# Shared agent prompts — imported by main.py and cli.py
+# Shared agent prompts — imported by factory.py
 # ---------------------------------------------------------------------------
 
-TESTER_PROMPT = """\
-You are a tester agent. Verify the desired user experience works end-to-end — \
-run the app, call APIs, check files, verify imports, run scripts.
-Fix minor issues (style, formatting) yourself. Only report blocking issues \
-(crashes, failing tests, missing features) with specific error messages.
-Say 'ALL CHECKS PASS' if clean, 'MINOR ISSUES FIXED' if you only fixed cosmetics."""
+from kodo.orchestrators.base import PASS_SIGNAL, MINOR_SIGNAL
 
-TESTER_BROWSER_PROMPT = """\
-You are a tester agent with browser access. Verify the app works by opening it \
-in a real browser — navigate the UI, click buttons, fill forms, check rendering.
-Fix minor issues (style, formatting) yourself. Only report blocking issues \
-(broken functionality, crashes, missing features) with specific error messages.
-Say 'ALL CHECKS PASS' if clean, 'MINOR ISSUES FIXED' if you only fixed cosmetics."""
+_VERIFIER_SUFFIX = (
+    f"Fix minor issues yourself. Only report blocking issues with specific error messages.\n"
+    f"Say '{PASS_SIGNAL}' if clean, '{MINOR_SIGNAL}' if you only fixed cosmetics."
+)
 
-ARCHITECT_PROMPT = """\
-You are a code reviewer. Read the codebase, identify bugs and structural issues \
-with specific file/line references.
-Fix minor issues (style, naming) yourself. Only report blocking issues \
-(bugs, missing features, broken tests, deviations from goal).
-Say 'ALL CHECKS PASS' if clean, 'MINOR ISSUES FIXED' if you only fixed cosmetics."""
+TESTER_PROMPT = (
+    "You are a tester agent. Verify the desired user experience works end-to-end — "
+    "run the app, call APIs, check files, verify imports, run scripts.\n"
+    + _VERIFIER_SUFFIX
+)
+
+TESTER_BROWSER_PROMPT = (
+    "You are a tester agent with browser access. Verify the app works by opening it "
+    "in a real browser — navigate the UI, click buttons, fill forms, check rendering.\n"
+    + _VERIFIER_SUFFIX
+)
+
+ARCHITECT_PROMPT = (
+    "You are a code reviewer. Read the codebase, identify bugs and structural issues "
+    "with specific file/line references.\n" + _VERIFIER_SUFFIX
+)
 
 
 def make_session(

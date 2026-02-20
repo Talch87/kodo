@@ -1,7 +1,7 @@
 """Tests for the done tool handler in ClaudeCodeOrchestrator's MCP server.
 
 Note: verification logic (tester/architect pass/fail) is tested in test_verify_done.py.
-These tests focus on the MCP done handler wiring and _DoneSignal state management.
+These tests focus on the MCP done handler wiring and DoneSignal state management.
 """
 
 from __future__ import annotations
@@ -9,14 +9,15 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-from kodo.orchestrators.claude_code import _DoneSignal, _build_mcp_server
+from kodo.orchestrators.base import DoneSignal
+from kodo.orchestrators.claude_code import _build_mcp_server
 from kodo.summarizer import Summarizer
 from tests.conftest import make_agent
 
 
 def _make_done_handler(team, project_dir, goal="Build X"):
     """Build the MCP server and extract the `done` handler function."""
-    signal = _DoneSignal()
+    signal = DoneSignal()
     with (
         patch("kodo.summarizer._probe_ollama", return_value=None),
         patch("kodo.summarizer._probe_gemini", return_value=None),

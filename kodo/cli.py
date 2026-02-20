@@ -2,10 +2,8 @@
 
 import argparse
 import json
-import os
-import subprocess
+import re
 import sys
-import uuid
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -14,8 +12,15 @@ load_dotenv()
 
 import questionary
 
-from kodo import log, __version__
-from kodo.factory import MODES, get_mode, build_orchestrator, has_claude, has_cursor, check_api_key
+from kodo import log, make_session, __version__
+from kodo.factory import (
+    MODES,
+    get_mode,
+    build_orchestrator,
+    has_claude,
+    has_cursor,
+    check_api_key,
+)
 from kodo.orchestrators.base import GoalPlan, GoalStage, ResumeState
 
 
@@ -24,33 +29,30 @@ def _print_banner() -> None:
     print("  https://github.com/ikamen/kodo\n")
 
 
-INTAKE_PROMPT = """\
-You are a project intake interviewer helping refine a software project goal.
+_INTAKE_PREAMBLE = """\
+You are a project intake interviewer helping refine a software project goal{purpose}.
 
 The user will give you their goal as the first message. Your job:
 1. Read it carefully
 2. Ask 2-3 focused clarifying questions about constraints, tech choices, \
-   edge cases, architecture preferences, and scope
+edge cases, architecture preferences, and scope
 3. Have a natural conversation to fill in gaps
-4. When you have enough clarity, write a refined, detailed goal to \
-   .kodo/goal-refined.md
+4. When you have enough clarity, write {output}
 
 Start by acknowledging the goal briefly, then ask your first questions.
-Keep the conversation focused and practical — don't over-interview.
-When you write the refined goal file, tell the user they can type /exit."""
+Keep the conversation focused and practical — don't over-interview."""
 
+INTAKE_PROMPT = _INTAKE_PREAMBLE.format(
+    purpose="",
+    output="a refined, detailed goal to .kodo/goal-refined.md",
+)
 
-INTAKE_STAGES_PROMPT = """\
-You are a project intake interviewer helping refine a software project goal \
-into an ordered list of stages.
-
-The user will give you their goal as the first message. Your job:
-1. Read it carefully
-2. Ask 2-3 focused clarifying questions about constraints, tech choices, \
-   edge cases, architecture preferences, and scope
-3. Have a natural conversation to fill in gaps
-4. When you have enough clarity, write a structured goal plan to \
-   .kodo/goal-plan.json
+INTAKE_STAGES_PROMPT = (
+    _INTAKE_PREAMBLE.format(
+        purpose=" into an ordered list of stages",
+        output="a structured goal plan to .kodo/goal-plan.json",
+    )
+    + """
 
 The JSON format MUST be:
 {
@@ -60,19 +62,22 @@ The JSON format MUST be:
       "index": 1,
       "name": "Short label",
       "description": "Full prose description of what this stage accomplishes",
-      "acceptance_criteria": "Verifiable definition of done for this stage"
+      "acceptance_criteria": "Verifiable definition of done for this stage",
+      "browser_testing": false
     }
   ]
 }
+
+Set "browser_testing" to true ONLY for stages that build or modify a web UI \
+that should be verified in a real browser. Default is false.
 
 Guidelines for staging:
 - Break non-trivial goals into 2-5 stages
 - Each stage should be independently verifiable
 - Order stages so later ones build on earlier ones
 - Trivially simple goals can be a single stage
-- Each stage should be completable in 1-3 orchestrator cycles
-
-When you write the goal plan file, tell the user they can type /exit."""
+- Each stage should be completable in 1-3 orchestrator cycles"""
+)
 
 
 # ---------------------------------------------------------------------------
@@ -100,68 +105,17 @@ def get_goal() -> str:
     return text
 
 
-def _extract_intake_transcript(project_dir: Path, session_id: str) -> None:
-    """Extract human-readable transcript from a Claude Code session file."""
-    # Claude stores sessions under ~/.claude/projects/<escaped-path>/<session-id>.jsonl
-    escaped = str(project_dir).replace("/", "-")
-    session_file = (
-        Path.home() / ".claude" / "projects" / escaped / f"{session_id}.jsonl"
-    )
-    if not session_file.exists():
-        return
+def run_intake_chat(
+    backend: str,
+    project_dir: Path,
+    goal_text: str,
+    staged: bool = False,
+) -> GoalPlan | str | None:
+    """Interactive intake chat using the Session abstraction.
 
-    lines = []
-    for raw in session_file.read_text().splitlines():
-        try:
-            d = json.loads(raw)
-        except json.JSONDecodeError:
-            continue
-        msg_type = d.get("type")
-        if msg_type not in ("user", "assistant"):
-            continue
-
-        content = (
-            d.get("message", {}).get("content", "")
-            if isinstance(d.get("message"), dict)
-            else ""
-        )
-
-        # Skip system/command messages
-        if isinstance(content, str) and content.startswith("<"):
-            continue
-
-        # Flatten content blocks
-        if isinstance(content, list):
-            parts = []
-            for block in content:
-                if isinstance(block, dict):
-                    if block.get("type") == "text":
-                        parts.append(block["text"])
-                    elif block.get("type") == "tool_use":
-                        parts.append(f"*[Tool: {block['name']}]*")
-                    elif block.get("type") == "tool_result":
-                        parts.append("*[Tool result]*")
-                else:
-                    parts.append(str(block))
-            content = "\n".join(parts)
-
-        if not content or not content.strip():
-            continue
-
-        role = "User" if msg_type == "user" else "Claude"
-        lines.append(f"### {role}\n{content.strip()}\n")
-
-    if lines:
-        selfo_dir = project_dir / ".kodo"
-        transcript_path = selfo_dir / "intake-transcript.md"
-        transcript_path.write_text(
-            f"# Intake Interview Transcript\n\n"
-            f"*Session ID: {session_id}*\n\n---\n\n" + "\n".join(lines)
-        )
-
-
-def run_intake(project_dir: Path, goal_text: str) -> str:
-    """Write goal.md, launch interactive Claude session for intake, read back refined goal."""
+    Returns GoalPlan if staged + file written, refined goal string if
+    single + file written, or None if user bailed.
+    """
     selfo_dir = project_dir / ".kodo"
     selfo_dir.mkdir(parents=True, exist_ok=True)
 
@@ -169,46 +123,73 @@ def run_intake(project_dir: Path, goal_text: str) -> str:
     goal_path.write_text(goal_text)
     print(f"\nGoal saved to {goal_path}")
 
-    session_id = str(uuid.uuid4())
-    print("\n--- Intake interview (chat with Claude, /exit when done) ---\n")
+    prompt = INTAKE_STAGES_PROMPT if staged else INTAKE_PROMPT
+    model = "opus" if backend == "claude" else "composer-1.5"
+    session = make_session(backend, model, budget=None, system_prompt=prompt)
 
-    initial_message = f"Here's my project goal:\n\n{goal_text}"
-    proc = subprocess.run(
-        [
-            "claude",
-            "--session-id",
-            session_id,
-            "--system-prompt",
-            INTAKE_PROMPT,
-            "--permission-mode",
-            "acceptEdits",
-            initial_message,
-        ],
-        cwd=project_dir,
-        env={k: v for k, v in os.environ.items() if k != "CLAUDECODE"},
-    )
-    if proc.returncode != 0:
-        print(f"\nWarning: claude exited with code {proc.returncode}")
+    output_file = selfo_dir / ("goal-plan.json" if staged else "goal-refined.md")
 
-    # Save session ID and extract transcript
-    (selfo_dir / "intake-session-id.txt").write_text(session_id)
-    _extract_intake_transcript(project_dir, session_id)
+    print("\n--- Intake interview (type /done or empty line to finish) ---\n")
 
-    refined_path = selfo_dir / "goal-refined.md"
-    if refined_path.exists():
-        refined = refined_path.read_text().strip()
-        print(f"\nRefined goal read from {refined_path}")
-        return refined
+    # First message
+    initial = f"Here's my project goal:\n\n{goal_text}"
+    result = session.query(initial, project_dir, max_turns=10)
+    print(f"\n{result.text}\n")
 
-    print("\nNo refined goal written; using original goal.")
-    return goal_text
+    # Check if output was already written on first turn
+    if output_file.exists():
+        return _read_intake_output(output_file, staged)
+
+    # Conversation loop
+    while True:
+        try:
+            user_input = input("You: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+
+        if not user_input or user_input == "/done":
+            break
+
+        result = session.query(user_input, project_dir, max_turns=10)
+        print(f"\n{result.text}\n")
+
+        if output_file.exists():
+            return _read_intake_output(output_file, staged)
+
+    # Check one last time
+    if output_file.exists():
+        return _read_intake_output(output_file, staged)
+
+    print("\nNo output file written; using original goal.")
+    return None
+
+
+def _read_intake_output(output_file: Path, staged: bool) -> GoalPlan | str | None:
+    """Read the intake output file and return the appropriate type."""
+    if staged:
+        try:
+            raw = json.loads(output_file.read_text())
+            plan = _parse_goal_plan(raw)
+            if plan.stages:
+                print(f"\nGoal plan read from {output_file}")
+                print(f"  {len(plan.stages)} stage(s):")
+                for s in plan.stages:
+                    print(f"    {s.index}. {s.name}")
+                return plan
+        except json.JSONDecodeError as exc:
+            print(f"\nWarning: invalid JSON in {output_file}: {exc}")
+        return None
+    else:
+        refined = output_file.read_text().strip()
+        if refined:
+            print(f"\nRefined goal read from {output_file}")
+            return refined
+        return None
 
 
 def _looks_staged(goal_text: str) -> bool:
     """Heuristic: detect if goal text has numbered steps or bullet lists."""
-    import re
-
-    # Match patterns like "1. ", "1) ", "- Step 1:", etc.
     numbered = re.findall(r"^\s*\d+[\.\)]\s+", goal_text, re.MULTILINE)
     return len(numbered) >= 2
 
@@ -237,64 +218,10 @@ def _parse_goal_plan(raw: dict) -> GoalPlan:
                 name=name,
                 description=description,
                 acceptance_criteria=acceptance_criteria,
+                browser_testing=bool(s.get("browser_testing", False)),
             )
         )
     return GoalPlan(context=context, stages=stages)
-
-
-def run_staged_intake(project_dir: Path, goal_text: str) -> GoalPlan | None:
-    """Run intake interview focused on producing a staged goal plan.
-
-    Returns a GoalPlan if successful, or None if no plan was produced.
-    """
-    selfo_dir = project_dir / ".kodo"
-    selfo_dir.mkdir(parents=True, exist_ok=True)
-
-    goal_path = selfo_dir / "goal.md"
-    goal_path.write_text(goal_text)
-    print(f"\nGoal saved to {goal_path}")
-
-    session_id = str(uuid.uuid4())
-    print("\n--- Staged intake interview (chat with Claude, /exit when done) ---\n")
-
-    initial_message = f"Here's my project goal:\n\n{goal_text}"
-    proc = subprocess.run(
-        [
-            "claude",
-            "--session-id",
-            session_id,
-            "--system-prompt",
-            INTAKE_STAGES_PROMPT,
-            "--permission-mode",
-            "acceptEdits",
-            initial_message,
-        ],
-        cwd=project_dir,
-        env={k: v for k, v in os.environ.items() if k != "CLAUDECODE"},
-    )
-    if proc.returncode != 0:
-        print(f"\nWarning: claude exited with code {proc.returncode}")
-
-    # Save session ID and extract transcript
-    (selfo_dir / "intake-session-id.txt").write_text(session_id)
-    _extract_intake_transcript(project_dir, session_id)
-
-    plan_path = selfo_dir / "goal-plan.json"
-    if plan_path.exists():
-        try:
-            raw = json.loads(plan_path.read_text())
-            plan = _parse_goal_plan(raw)
-            if plan.stages:
-                print(f"\nGoal plan read from {plan_path}")
-                print(f"  {len(plan.stages)} stage(s):")
-                for s in plan.stages:
-                    print(f"    {s.index}. {s.name}")
-                return plan
-        except json.JSONDecodeError as exc:
-            print(f"\nWarning: invalid JSON in {plan_path}: {exc}")
-
-    print("\nNo goal plan written; will use single-goal mode.")
-    return None
 
 
 def _load_goal_plan(project_dir: Path) -> GoalPlan | None:
@@ -450,7 +377,13 @@ def _save_config(project_dir: Path, params: dict) -> None:
 def _load_or_select_params(project_dir: Path) -> dict:
     """Offer to reuse previous config, or run interactive selection."""
     cfg_path = _config_path(project_dir)
-    required_keys = {"mode", "orchestrator", "orchestrator_model", "max_exchanges", "max_cycles"}
+    required_keys = {
+        "mode",
+        "orchestrator",
+        "orchestrator_model",
+        "max_exchanges",
+        "max_cycles",
+    }
     if cfg_path.exists():
         try:
             prev = json.loads(cfg_path.read_text())
@@ -616,6 +549,37 @@ def main() -> None:
         sys.exit(130)
 
 
+def _offer_intake(project_dir: Path, goal_text: str) -> GoalPlan | str | None:
+    """Offer intake interview, letting user pick backend. Returns result or None."""
+    backends: list[str] = []
+    if has_claude():
+        backends.append("Claude")
+    if has_cursor():
+        backends.append("Cursor")
+
+    if not backends:
+        print("\nSkipping intake (no backends available).")
+        return None
+
+    options = backends + ["Skip"]
+    choice = _select_one("\nRefine goal with:", options)
+    if choice == "Skip":
+        return None
+
+    backend = "claude" if choice == "Claude" else "cursor"
+
+    staged = False
+    if _looks_staged(goal_text):
+        print("This goal looks like it has multiple steps.")
+        stage_choice = input("Break into stages? [Y/n] ").strip().lower()
+        staged = not stage_choice or stage_choice == "y"
+    else:
+        stage_choice = input("Break into stages? [y/N] ").strip().lower()
+        staged = stage_choice == "y"
+
+    return run_intake_chat(backend, project_dir, goal_text, staged=staged)
+
+
 def _main_inner() -> None:
     parser = argparse.ArgumentParser(
         description="kodo — autonomous multi-agent coding",
@@ -691,7 +655,10 @@ def _main_inner() -> None:
     else:
         goal_text = get_goal()
 
-    # 2. Intake interview (requires Claude Code CLI)
+    # 2. Select parameters (or reuse previous config)
+    params = _load_or_select_params(project_dir)
+
+    # 3. Intake interview (uses Session abstraction — works with any backend)
     plan: GoalPlan | None = None
 
     # Check for existing goal plan first
@@ -717,7 +684,7 @@ def _main_inner() -> None:
         if refined_path.exists():
             refined = refined_path.read_text().strip()
             if refined:
-                print(f"\nFound refined goal from previous intake:")
+                print("\nFound refined goal from previous intake:")
                 print("-" * 40)
                 print(refined[:500])
                 if len(refined) > 500:
@@ -726,39 +693,18 @@ def _main_inner() -> None:
                 use_refined = input("Use this refined goal? [Y/n] ").strip().lower()
                 if not use_refined or use_refined == "y":
                     goal_text = refined
-                elif has_claude():
-                    redo = input("Re-run intake interview? [y/N] ").strip().lower()
-                    if redo == "y":
-                        goal_text = run_intake(project_dir, goal_text)
-        elif has_claude():
-            # Offer staged intake for multi-step goals
-            if _looks_staged(goal_text):
-                print("\nThis goal looks like it has multiple steps.")
-                intake_choice = input(
-                    "Run staged intake (break into stages)? [Y/n] "
-                ).strip().lower()
-                if not intake_choice or intake_choice == "y":
-                    plan = run_staged_intake(project_dir, goal_text)
                 else:
-                    skip = input("Refine goal (single stage)? [Y/n] ").strip().lower()
-                    if not skip or skip == "y":
-                        goal_text = run_intake(project_dir, goal_text)
-            else:
-                skip = input("\nRefine goal with Claude? [Y/n] ").strip().lower()
-                if not skip or skip == "y":
-                    # Offer staged vs single intake
-                    intake_type = input(
-                        "  Break into stages? [y/N] "
-                    ).strip().lower()
-                    if intake_type == "y":
-                        plan = run_staged_intake(project_dir, goal_text)
-                    else:
-                        goal_text = run_intake(project_dir, goal_text)
+                    intake_result = _offer_intake(project_dir, goal_text)
+                    if isinstance(intake_result, GoalPlan):
+                        plan = intake_result
+                    elif isinstance(intake_result, str):
+                        goal_text = intake_result
         else:
-            print("\nSkipping intake interview (Claude Code CLI not found).")
-
-    # 3. Select parameters (or reuse previous config)
-    params = _load_or_select_params(project_dir)
+            intake_result = _offer_intake(project_dir, goal_text)
+            if isinstance(intake_result, GoalPlan):
+                plan = intake_result
+            elif isinstance(intake_result, str):
+                goal_text = intake_result
 
     # 4. Confirm
     mode = get_mode(params["mode"])
