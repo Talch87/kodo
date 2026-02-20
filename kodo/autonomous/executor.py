@@ -118,18 +118,32 @@ class AutoImprovementExecutor:
                 cwd=self.project_dir,
                 check=True,
                 capture_output=True,
-                timeout=10
+                timeout=5
             )
+        except subprocess.TimeoutExpired:
+            raise Exception("Git checkout timeout - skipping this improvement")
         except Exception as e:
             # Branch might already exist, try to clean it up
-            subprocess.run(["git", "branch", "-D", branch_name], cwd=self.project_dir, capture_output=True)
-            subprocess.run(
-                ["git", "checkout", "-b", branch_name],
-                cwd=self.project_dir,
-                check=True,
-                capture_output=True,
-                timeout=10
-            )
+            try:
+                subprocess.run(
+                    ["git", "branch", "-D", branch_name],
+                    cwd=self.project_dir,
+                    capture_output=True,
+                    timeout=5
+                )
+            except:
+                pass
+            
+            try:
+                subprocess.run(
+                    ["git", "checkout", "-b", branch_name],
+                    cwd=self.project_dir,
+                    check=True,
+                    capture_output=True,
+                    timeout=5
+                )
+            except subprocess.TimeoutExpired:
+                raise Exception("Git checkout timeout even after cleanup")
     
     def _implement_improvement(self, improvement: Improvement) -> dict:
         """Implement the improvement directly based on type."""
@@ -346,7 +360,7 @@ This file tracks improvements made by Kodo's autonomous system.
                 ["git", "checkout", "main"],
                 cwd=self.project_dir,
                 capture_output=True,
-                timeout=10
+                timeout=5
             )
             
             # Merge with squash
@@ -354,7 +368,7 @@ This file tracks improvements made by Kodo's autonomous system.
                 ["git", "merge", "--squash", branch_name],
                 cwd=self.project_dir,
                 capture_output=True,
-                timeout=10
+                timeout=5
             )
             
             # Commit
@@ -362,15 +376,19 @@ This file tracks improvements made by Kodo's autonomous system.
                 ["git", "commit", "-m", f"chore: {title}"],
                 cwd=self.project_dir,
                 capture_output=True,
-                timeout=10
+                timeout=5
             )
             
             # Delete branch
             subprocess.run(
                 ["git", "branch", "-D", branch_name],
                 cwd=self.project_dir,
-                capture_output=True
+                capture_output=True,
+                timeout=5
             )
+        except subprocess.TimeoutExpired:
+            # Ignore timeout errors in merge
+            pass
         except Exception as e:
             # Ignore merge errors, just log
             pass
@@ -382,16 +400,17 @@ This file tracks improvements made by Kodo's autonomous system.
                 ["git", "checkout", "main"],
                 cwd=self.project_dir,
                 capture_output=True,
-                timeout=10
+                timeout=5
             )
             
             if branch_name:
                 subprocess.run(
                     ["git", "branch", "-D", branch_name],
                     cwd=self.project_dir,
-                    capture_output=True
+                    capture_output=True,
+                    timeout=5
                 )
-        except Exception:
+        except (subprocess.TimeoutExpired, Exception):
             pass
     
     def success_rate(self, improvement_type: str | None = None) -> float:

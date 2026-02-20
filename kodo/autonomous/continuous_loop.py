@@ -12,6 +12,9 @@ from kodo.autonomous.monitor import RealTimeMonitor, HealthMetrics
 from kodo.autonomous.executor import AutoImprovementExecutor, Improvement
 from kodo import log
 
+# Ensure time is available in run_sync method
+__all__ = ["ContinuousImprovementSystem", "create_system"]
+
 
 class ContinuousImprovementSystem:
     """Main system that runs Kodo's autonomous self-improvement loop."""
@@ -50,6 +53,58 @@ class ContinuousImprovementSystem:
             await asyncio.gather(*tasks)
         except KeyboardInterrupt:
             log.tprint("⏹️  Shutting down...")
+            self.running = False
+    
+    def run_sync(self):
+        """Synchronous run loop (simpler, for daemon)."""
+        import time
+        
+        self.running = True
+        log.tprint("🚀 Starting Kodo Continuous Self-Improvement System (sync mode)")
+        log.tprint(f"   Project: {self.project_dir}")
+        log.tprint("")
+        
+        cycle = 0
+        
+        try:
+            while self.running:
+                cycle += 1
+                
+                # Every cycle: analyze for improvements
+                improvements = self._analyze_codebase()
+                for improvement in improvements:
+                    if self._is_safe_to_implement(improvement):
+                        self.improvement_queue.append(improvement)
+                        log.tprint(f"📝 Queued: {improvement.title}")
+                
+                # Execute next improvement
+                if self.improvement_queue:
+                    metrics_before = self.monitor.metrics_summary()
+                    result = self.executor.execute_next(metrics_before)
+                    
+                    if result:
+                        self.total_improvements += 1
+                        
+                        if result.success:
+                            log.tprint(f"✅ MERGED: {result.improvement.title}")
+                        else:
+                            log.tprint(f"❌ FAILED: {result.improvement.title}")
+                
+                # Report every 10 cycles
+                if cycle % 10 == 0:
+                    uptime = time.time() - self.system_started
+                    summary = self.executor.execution_summary()
+                    
+                    log.tprint(f"\n📊 Status (cycle {cycle}, uptime {uptime/60:.1f}m)")
+                    log.tprint(f"   Improvements: {self.total_improvements}")
+                    log.tprint(f"   Queue: {len(self.improvement_queue)}")
+                    log.tprint(f"   Success rate: {summary['success_rate']:.0f}%\n")
+                
+                # Sleep before next cycle
+                time.sleep(30)
+        
+        except KeyboardInterrupt:
+            log.tprint("\n⏹️  Shutting down...")
             self.running = False
     
     async def _monitor_loop(self):
