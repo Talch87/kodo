@@ -62,7 +62,7 @@ def make_agent(
 ) -> Agent:
     """Create an Agent backed by a FakeSession."""
     session = FakeSession(response_text=response_text, is_error=is_error)
-    return Agent(session, prompt, max_turns=max_turns)  # positional → description
+    return Agent(session, prompt, max_turns=max_turns, checkpoint_enabled=False)
 
 
 @pytest.fixture

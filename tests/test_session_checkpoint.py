@@ -452,3 +452,51 @@ class TestResumeFromCheckpoint:
         assert cp.agent_name == "worker_smart"
         # The session_id can be injected into a new ClaudeSession to resume
         assert cp.session_id is not None
+
+
+class TestLogConvenienceFunctions:
+    """Test the save/load/clear wrapper functions in kodo.log."""
+
+    def test_save_checkpoint(self, tmp_path: Path) -> None:
+        cp = SessionCheckpoint(
+            agent_name="worker", session_id="s1", run_id="log-fn-1", tokens_used=42
+        )
+        path = log.save_checkpoint(cp, tmp_path)
+        assert path.exists()
+        assert path.name == "worker.json"
+
+    def test_load_checkpoint(self, tmp_path: Path) -> None:
+        SessionCheckpoint(
+            agent_name="worker", session_id="s1", run_id="log-fn-2", tokens_used=99
+        ).save(tmp_path)
+        loaded = log.load_checkpoint("log-fn-2", "worker", tmp_path)
+        assert loaded is not None
+        assert loaded.tokens_used == 99
+
+    def test_load_checkpoint_missing(self, tmp_path: Path) -> None:
+        assert log.load_checkpoint("nope", "nope", tmp_path) is None
+
+    def test_load_all_checkpoints(self, tmp_path: Path) -> None:
+        for name in ("a", "b", "c"):
+            SessionCheckpoint(
+                agent_name=name, session_id="s", run_id="log-fn-3"
+            ).save(tmp_path)
+        result = log.load_all_checkpoints("log-fn-3", tmp_path)
+        assert len(result) == 3
+        assert set(result.keys()) == {"a", "b", "c"}
+
+    def test_load_all_checkpoints_empty(self, tmp_path: Path) -> None:
+        assert log.load_all_checkpoints("missing", tmp_path) == {}
+
+    def test_clear_checkpoints(self, tmp_path: Path) -> None:
+        SessionCheckpoint(
+            agent_name="w", session_id="s", run_id="log-fn-4"
+        ).save(tmp_path)
+        cp_dir = tmp_path / ".kodo" / "checkpoints" / "log-fn-4"
+        assert cp_dir.exists()
+        log.clear_checkpoints("log-fn-4", tmp_path)
+        assert not cp_dir.exists()
+
+    def test_clear_checkpoints_noop(self, tmp_path: Path) -> None:
+        # Should not raise when nothing to clear
+        log.clear_checkpoints("nonexistent", tmp_path)

@@ -410,3 +410,49 @@ def _serialize(obj: Any) -> Any:
     if hasattr(obj, "__dataclass_fields__"):
         return asdict(obj)
     return repr(obj)
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint persistence helpers
+# ---------------------------------------------------------------------------
+
+
+def save_checkpoint(
+    checkpoint: "SessionCheckpoint", project_dir: Path  # noqa: F821
+) -> Path:
+    """Save a :class:`SessionCheckpoint` as JSON.
+
+    Writes to ``<project_dir>/.kodo/checkpoints/<run_id>/<agent_name>.json``.
+    Returns the path of the written file.
+    """
+    from kodo.sessions.base import SessionCheckpoint  # deferred to avoid circular
+
+    return checkpoint.save(project_dir)
+
+
+def load_checkpoint(
+    run_id: str, agent_name: str, project_dir: Path
+) -> "SessionCheckpoint | None":
+    """Load a single agent checkpoint, or ``None`` if it doesn't exist."""
+    from kodo.sessions.base import SessionCheckpoint
+
+    return SessionCheckpoint.load(run_id, agent_name, project_dir)
+
+
+def load_all_checkpoints(
+    run_id: str, project_dir: Path
+) -> "dict[str, SessionCheckpoint]":
+    """Load every agent checkpoint for *run_id*.
+
+    Returns ``{agent_name: checkpoint}`` — empty dict when none exist.
+    """
+    from kodo.sessions.base import SessionCheckpoint
+
+    return SessionCheckpoint.load_all(run_id, project_dir)
+
+
+def clear_checkpoints(run_id: str, project_dir: Path) -> None:
+    """Remove all checkpoints for *run_id* after successful completion."""
+    from kodo.sessions.base import SessionCheckpoint
+
+    SessionCheckpoint.clear(run_id, project_dir)
