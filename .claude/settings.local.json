@@ -4,7 +4,11 @@
       "Bash(wc:*)",
       "Bash(uv run:*)",
       "Bash(pip --version:*)",
-      "Bash(where:*)"
+      "Bash(where:*)",
+      "Bash(xargs:*)",
+      "Bash(python -c:*)",
+      "Bash(python:*)",
+      "Bash(py -c:*)"
     ]
   }
 }

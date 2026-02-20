@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -501,7 +502,7 @@ class OrchestratorBase:
 
             # Open the HTML log viewer for easy inspection
             log_file = log.get_log_file()
-            if log_file and log_file.exists():
+            if log_file and log_file.exists() and not os.environ.get("KODO_NO_VIEWER"):
                 from kodo.viewer import open_viewer
 
                 open_viewer(log_file)
