@@ -1,0 +1,12 @@
+
+.git/
+.github/
+.claude/
+tests/
+docs/
+examples/
+.kodo/
+*.md
+uv.lock
+pyproject.toml
+main.py
