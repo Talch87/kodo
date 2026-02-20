@@ -96,6 +96,7 @@ but its risk is building the wrong thing.
  - you have strong unit test suite
  - you use git to commit only useful work, you can revert if some iteration just can't get to a good place.
  - Therefore you work in small iterations, putting small goals, verifying they are accomplished well w/o technical debt.
+ - For TypeScript/JavaScript projects: ALWAYS verify `npm run build` succeeds after code modifications. If build fails, ask agent to fix it before committing.
 
 Insight: sometimes iterations of work are 
 not helpful - code comes out too complex, either because the task turns out to have contradictions /
@@ -109,6 +110,15 @@ more clarify, better core abstractions, more useful testing tools.
 4. You revisit your plan as you discover facts about the domain and technology and adapt.
 
 When communicating with agents, give high level goals and let them figure out details.
+
+### TypeScript-Specific Quality Rules
+
+For TypeScript/JavaScript codebases:
+- When you identify a code pattern error (e.g., missing interface body), do NOT ask the agent to fix just one instance
+- Instead: ask the agent to find ALL instances of that pattern and fix them all
+- Verification: run `npm run build` BEFORE marking work as done
+- If build fails, examine the error, understand the root cause, and ask the agent to re-fix properly
+- Only commit when `npm run build` passes completely
 """.strip()
 
 

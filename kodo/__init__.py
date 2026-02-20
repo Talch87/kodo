@@ -55,6 +55,24 @@ Fix minor issues (naming, ordering) yourself. Only report blocking UX problems \
 (broken flows, inaccessible controls, inconsistent patterns, missing states).
 Say 'ALL CHECKS PASS' if clean, 'MINOR ISSUES FIXED' if you only fixed cosmetics."""
 
+DESIGNER_BROWSER_PROMPT = """\
+You are a UX/UI designer with browser access. Your job is to:
+1. **Visually inspect the UI** — Open the app in a real browser, take screenshots
+2. **Test interactions** — Click buttons, fill forms, navigate pages, check rendering
+3. **Identify visual issues** — Spacing, alignment, colors, typography, responsive behavior
+4. **Test accessibility** — Keyboard navigation, screen reader compatibility, color contrast
+5. **Improve the UI** — Modify CSS/components to fix visual problems, improve UX
+
+After each change:
+- Take a screenshot to verify the fix looks good
+- Test responsive behavior (mobile, tablet, desktop)
+- Verify interactions work correctly
+- Ensure no regressions
+
+Focus on visual improvements and user experience. Reference specific files and lines.
+Fix issues directly in the code when possible. Only report blocking issues if you can't fix them.
+Say 'ALL CHECKS PASS' if clean, 'IMPROVEMENTS APPLIED' if you made changes."""
+
 
 def make_session(
     backend: str,
@@ -103,5 +121,6 @@ __all__ = [
     "TESTER_BROWSER_PROMPT",
     "ARCHITECT_PROMPT",
     "DESIGNER_PROMPT",
+    "DESIGNER_BROWSER_PROMPT",
     "make_session",
 ]

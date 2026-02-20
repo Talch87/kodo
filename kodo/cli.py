@@ -181,8 +181,6 @@ def run_intake_chat(
     goal_path = selfo_dir / "goal.md"
     goal_path.write_text(goal_text, encoding="utf-8")
     print(f"\nGoal saved to {goal_path}")
-        result = session.query(user_input, project_dir, max_turns=10)
-        print(f"\n{result.text}\n")
 
     # Check if output was written during the conversation
     if output_file.exists():
@@ -1136,7 +1134,6 @@ examples:
         output = _format_json_output(result, run_id, log_file)
         print(json.dumps(output, indent=2))
         sys.exit(EXIT_SUCCESS if result.finished else EXIT_PARTIAL)
-                goal_text = refined_path.read_text().strip() or goal_text
 
     if plan is None:
         refined_path = project_dir / ".kodo" / "goal-refined.md"
