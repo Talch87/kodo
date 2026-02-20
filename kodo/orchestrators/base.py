@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -13,6 +14,193 @@ from kodo.sessions.base import SessionCheckpoint
 
 # Team is just a named dict of agents
 TeamConfig = dict[str, Agent]
+
+
+# ---------------------------------------------------------------------------
+# Task complexity scoring and routing
+# ---------------------------------------------------------------------------
+
+# Keyword patterns that indicate task complexity levels
+_HIGH_COMPLEXITY_PATTERNS = [
+    r"\brefactor\b",
+    r"\barchitect\b",
+    r"\bredesign\b",
+    r"\bmigrat[ei]",
+    r"\bdebug\b.*\btricky\b",
+    r"\bcomplex\b",
+    r"\bmultiple files?\b",
+    r"\bcross[- ]?cutting\b",
+    r"\bperformance\b",
+    r"\boptimiz",
+    r"\bsecurity\b.*\baudit\b",
+    r"\brace condition\b",
+    r"\bconcurren",
+    r"\bdeadlock\b",
+    r"\bmemory leak\b",
+    r"\barchitectur",
+]
+
+_LOW_COMPLEXITY_PATTERNS = [
+    r"\badd\b.*\bcomment\b",
+    r"\bfix\b.*\btypo\b",
+    r"\brename\b",
+    r"\bupdate\b.*\bstring\b",
+    r"\bchange\b.*\btext\b",
+    r"\bsimple\b",
+    r"\bstraightforward\b",
+    r"\bsmall\b.*\bchange\b",
+    r"\bquick\b.*\bfix\b",
+    r"\bone[- ]?line\b",
+    r"\btrivial\b",
+]
+
+_ARCHITECT_PATTERNS = [
+    r"\breview\b",
+    r"\bsurvey\b",
+    r"\baudit\b",
+    r"\bcritique\b",
+    r"\bassess\b",
+    r"\bevaluat\b",
+    r"\binspect\b.*\bcodebase\b",
+    r"\barchitectur",
+    r"\bdesign\b.*\bpattern\b",
+]
+
+
+@dataclass
+class TaskComplexity:
+    """Scored complexity of a task directive."""
+
+    score: float  # 0.0 (trivial) to 1.0 (highly complex)
+    recommended_agent: str  # "worker_fast", "worker_smart", or "architect"
+    reasoning: str  # brief explanation of the score
+
+    @property
+    def level(self) -> str:
+        """Human-readable complexity level."""
+        if self.score < 0.3:
+            return "low"
+        if self.score < 0.7:
+            return "medium"
+        return "high"
+
+
+class TaskRouter:
+    """Scores task complexity and recommends which agent to route to.
+
+    Uses heuristic keyword analysis and task length as signals.
+    Tracks routing decisions for measuring accuracy.
+    """
+
+    def __init__(self) -> None:
+        self._routing_history: list[dict] = []
+
+    def score_task(self, task: str) -> TaskComplexity:
+        """Analyze a task directive and return a complexity score + recommendation."""
+        task_lower = task.lower()
+        score = 0.5  # baseline
+
+        # Check for high-complexity signals
+        high_matches = sum(
+            1 for p in _HIGH_COMPLEXITY_PATTERNS if re.search(p, task_lower)
+        )
+        score += high_matches * 0.15
+
+        # Check for low-complexity signals
+        low_matches = sum(
+            1 for p in _LOW_COMPLEXITY_PATTERNS if re.search(p, task_lower)
+        )
+        score -= low_matches * 0.15
+
+        # Check for architect-specific signals
+        arch_matches = sum(
+            1 for p in _ARCHITECT_PATTERNS if re.search(p, task_lower)
+        )
+
+        # Task length as signal (longer = more complex)
+        word_count = len(task.split())
+        if word_count > 100:
+            score += 0.1
+        elif word_count < 20:
+            score -= 0.1
+
+        # Clamp to [0, 1]
+        score = max(0.0, min(1.0, score))
+
+        # Determine routing
+        if arch_matches >= 2:
+            recommended = "architect"
+            reasoning = f"Task has {arch_matches} architectural review signals"
+        elif score >= 0.6:
+            recommended = "worker_smart"
+            reasoning = (
+                f"Complexity score {score:.2f} (high) — "
+                f"{high_matches} complex pattern(s) detected"
+            )
+        elif score <= 0.35:
+            recommended = "worker_fast"
+            reasoning = (
+                f"Complexity score {score:.2f} (low) — "
+                f"{low_matches} simple pattern(s) detected"
+            )
+        else:
+            recommended = "worker_smart"
+            reasoning = f"Complexity score {score:.2f} (medium) — defaulting to smart worker"
+
+        return TaskComplexity(
+            score=score,
+            recommended_agent=recommended,
+            reasoning=reasoning,
+        )
+
+    def record_routing(
+        self,
+        task: str,
+        recommended_agent: str,
+        actual_agent: str,
+        success: bool,
+    ) -> None:
+        """Record a routing decision and its outcome for analysis."""
+        self._routing_history.append(
+            {
+                "task_summary": task[:100],
+                "recommended": recommended_agent,
+                "actual": actual_agent,
+                "followed_recommendation": recommended_agent == actual_agent,
+                "success": success,
+            }
+        )
+
+    @property
+    def routing_stats(self) -> dict:
+        """Compute routing accuracy statistics."""
+        if not self._routing_history:
+            return {
+                "total_tasks": 0,
+                "first_try_success_rate": 0.0,
+                "recommendation_follow_rate": 0.0,
+                "followed_and_succeeded_rate": 0.0,
+            }
+
+        total = len(self._routing_history)
+        successes = sum(1 for r in self._routing_history if r["success"])
+        followed = sum(
+            1 for r in self._routing_history if r["followed_recommendation"]
+        )
+        followed_succeeded = sum(
+            1
+            for r in self._routing_history
+            if r["followed_recommendation"] and r["success"]
+        )
+
+        return {
+            "total_tasks": total,
+            "first_try_success_rate": successes / total if total else 0.0,
+            "recommendation_follow_rate": followed / total if total else 0.0,
+            "followed_and_succeeded_rate": (
+                followed_succeeded / followed if followed else 0.0
+            ),
+        }
 
 
 @dataclass
@@ -111,6 +299,24 @@ more clarify, better core abstractions, more useful testing tools.
 4. You revisit your plan as you discover facts about the domain and technology and adapt.
 
 When communicating with agents, give high level goals and let them figure out details.
+
+### Task Routing Guidelines
+
+Route tasks to the RIGHT agent on the FIRST try to avoid rework:
+- **worker_fast** (Cursor): Simple, well-defined tasks — add a feature, create a file,
+  fix a known bug, write boilerplate code. Speed matters more than reasoning depth.
+- **worker_smart** (Claude Code): Complex tasks — debugging tricky issues, refactoring
+  across multiple files, architectural decisions, performance optimization, tasks
+  requiring understanding of large codebases, or anything where worker_fast struggled.
+- **architect**: Codebase survey, design review, bug analysis, second opinions on
+  architectural decisions. Does NOT make changes — only reviews and recommends.
+
+**Routing rules:**
+1. Start with architect to survey the codebase BEFORE planning complex work.
+2. If a task involves >3 files or architectural impact, use worker_smart.
+3. If worker_fast fails on a task, escalate to worker_smart with the error context.
+4. Never send complex refactors or debugging tasks to worker_fast.
+5. Each task should be ONE focused change that can be built and tested independently.
 
 ### TypeScript-Specific Quality Rules
 
