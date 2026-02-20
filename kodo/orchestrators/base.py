@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Protocol
 
 from kodo.agent import Agent
+from kodo.sessions.base import SessionCheckpoint
 
 
 # Team is just a named dict of agents
@@ -492,6 +493,33 @@ class OrchestratorBase:
                 elif isinstance(sess, CursorSession):
                     sess._chat_id = sid
 
+            # Load checkpoints and log token savings from resume
+            checkpoints = SessionCheckpoint.load_all(
+                resume.prior_summary[:64] if resume.prior_summary else "unknown",
+                project_dir,
+            )
+            # Try loading by run_id from the log file
+            run_id = log.get_run_id()
+            if run_id:
+                checkpoints = SessionCheckpoint.load_all(run_id, project_dir)
+
+            if checkpoints:
+                saved_tokens = sum(cp.tokens_used for cp in checkpoints.values())
+                saved_queries = sum(
+                    cp.queries_completed for cp in checkpoints.values()
+                )
+                log.emit(
+                    "checkpoint_resume",
+                    agents_resumed=list(checkpoints.keys()),
+                    total_tokens_in_checkpoints=saved_tokens,
+                    total_queries_in_checkpoints=saved_queries,
+                    estimated_token_savings=saved_tokens,
+                )
+                log.tprint(
+                    f"[orchestrator] Resumed {len(checkpoints)} agent(s) from "
+                    f"checkpoints — ~{saved_tokens:,} tokens preserved"
+                )
+
         start_cycle = (resume.completed_cycles if resume else 0) + 1
         prior_summary = resume.prior_summary if resume else ""
 
@@ -540,6 +568,13 @@ class OrchestratorBase:
             # Clean up agent sessions
             for agent in team.values():
                 agent.close()
+
+            # Clean up checkpoints on successful completion
+            if result.finished:
+                run_id = log.get_run_id()
+                if run_id:
+                    SessionCheckpoint.clear(run_id, project_dir)
+                    log.emit("checkpoints_cleared", run_id=run_id, reason="run_completed")
 
             log.emit(
                 "run_end",

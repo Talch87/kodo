@@ -4,7 +4,7 @@ __version__ = "0.4.9"
 
 from kodo import log
 from kodo.agent import Agent, AgentResult
-from kodo.sessions.base import QueryResult, Session, SessionStats
+from kodo.sessions.base import QueryResult, Session, SessionCheckpoint, SessionStats
 from kodo.orchestrators.base import (
     CycleResult,
     Orchestrator,
@@ -111,6 +111,7 @@ __all__ = [
     "AgentResult",
     "QueryResult",
     "Session",
+    "SessionCheckpoint",
     "SessionStats",
     "CycleResult",
     "ResumeState",
