@@ -126,17 +126,22 @@ def test_empty_team(tmp_project: Path) -> None:
     assert "verifier" in result.lower()
 
 
-def test_agents_called_with_new_conversation(tmp_project: Path) -> None:
-    """Verification agents are called with new_conversation=True."""
+def test_verification_starts_fresh_session(tmp_project: Path) -> None:
+    """Verification agents start with a fresh session (stats cleared before run)."""
     tester = make_agent("ALL CHECKS PASS")
     architect = make_agent("ALL CHECKS PASS")
     team = {"tester": tester, "architect": architect}
 
+    # Simulate prior work — dirty the stats
+    tester.run("prior task", tmp_project, agent_name="tester")
+    architect.run("prior task", tmp_project, agent_name="architect")
+    assert tester.session.stats.queries == 1
+
     verify_done(GOAL, SUMMARY, team, tmp_project)
 
-    # new_conversation=True triggers session.reset()
-    assert tester.session.reset_count == 1
-    assert architect.session.reset_count == 1
+    # Stats should reflect only the verification query, not prior work
+    assert tester.session.stats.queries == 1
+    assert architect.session.stats.queries == 1
 
 
 def test_goal_and_summary_in_prompt(tmp_project: Path) -> None:
@@ -224,22 +229,21 @@ def test_minor_issues_fixed_case_insensitive(tmp_project: Path) -> None:
     assert verify_done(GOAL, SUMMARY, team, tmp_project) is None
 
 
-def test_second_attempt_keeps_session(tmp_project: Path) -> None:
-    """Second done() call does not reset verifier sessions (reuses context)."""
+def test_second_attempt_accumulates_queries(tmp_project: Path) -> None:
+    """Second done() call reuses verifier sessions (queries accumulate)."""
     tester = make_agent("ALL CHECKS PASS")
     architect = make_agent("ALL CHECKS PASS")
     team = {"tester": tester, "architect": architect}
     state = VerificationState()
 
-    # First call — resets sessions
+    # First call — resets then queries
     verify_done(GOAL, SUMMARY, team, tmp_project, state=state)
-    assert tester.session.reset_count == 1
-    assert architect.session.reset_count == 1
+    assert tester.session.stats.queries == 1
 
-    # Second call — should NOT reset (persistent context)
+    # Second call — should NOT reset (persistent context), so queries accumulate
     verify_done(GOAL, SUMMARY, team, tmp_project, state=state)
-    assert tester.session.reset_count == 1  # still 1, not 2
-    assert architect.session.reset_count == 1
+    assert tester.session.stats.queries == 2
+    assert architect.session.stats.queries == 2
 
 
 def test_attempt_count_in_rejection(tmp_project: Path) -> None:

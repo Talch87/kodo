@@ -75,7 +75,7 @@ def test_chat_id_from_alternate_keys(tmp_path: Path):
         with patch("kodo.sessions.cursor.subprocess.Popen", factory):
             session.query("q", tmp_path, max_turns=10)
 
-        assert session._chat_id == f"id-{key}"
+        assert session.session_id == f"id-{key}"
 
 
 def test_system_prompt_resent_after_reset(tmp_path: Path):

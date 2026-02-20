@@ -95,7 +95,8 @@ def test_error_on_nonzero_returncode(tmp_path: Path):
     assert result.is_error is True
 
 
-def test_reset_clears_state(tmp_path: Path):
+def test_reset_starts_fresh_session(tmp_path: Path):
+    """After reset(), the next query starts a new chat (no --resume flag)."""
     log.init(RunDir.create(tmp_path, "cursor_reset"))
     session = CursorSession(model="composer-1.5")
 
@@ -106,10 +107,20 @@ def test_reset_clears_state(tmp_path: Path):
         session.query("task", tmp_path, max_turns=10)
 
     assert session.stats.queries == 1
-    assert session._chat_id == "c1"
+    assert session.session_id == "c1"
 
     session.reset()
-
     assert session.stats.queries == 0
-    assert session._chat_id is None
-    assert session._system_prompt_sent is False
+
+    # After reset, next query should NOT resume the old chat
+    calls = []
+    original_factory = _make_popen_factory(result_text="ok2", chat_id="c2")
+
+    def capturing_factory(cmd, **kwargs):
+        calls.append(cmd)
+        return original_factory(cmd, **kwargs)
+
+    with patch("kodo.sessions.cursor.subprocess.Popen", capturing_factory):
+        session.query("new task", tmp_path, max_turns=10)
+
+    assert "--resume" not in calls[0]

@@ -27,7 +27,6 @@ class FakeSession:
         self._response_text = response_text
         self._is_error = is_error
         self._stats = SessionStats()
-        self.reset_count = 0
 
     @property
     def stats(self) -> SessionStats:
@@ -50,7 +49,6 @@ class FakeSession:
         )
 
     def reset(self) -> None:
-        self.reset_count += 1
         self._stats = SessionStats()
 
 
@@ -63,6 +61,34 @@ def make_agent(
     """Create an Agent backed by a FakeSession."""
     session = FakeSession(response_text=response_text, is_error=is_error)
     return Agent(session, prompt, max_turns=max_turns)  # positional → description
+
+
+def make_scripted_session(
+    responses: list[str],
+    project_dir: Path,
+    write_file: dict | None = None,
+) -> FakeSession:
+    """FakeSession that returns canned responses in order.
+
+    If write_file is given as {"on_query": N, "path": ..., "content": ...},
+    the file is written when query() is called for the Nth time (0-indexed).
+    """
+    call_count = 0
+    resps = list(responses)
+
+    class ScriptedSession(FakeSession):
+        def query(self, prompt, project_dir_arg, *, max_turns=10):
+            nonlocal call_count
+            idx = min(call_count, len(resps) - 1)
+            call_count += 1
+            if write_file and call_count - 1 == write_file["on_query"]:
+                path = project_dir / write_file["path"]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(write_file["content"])
+            self._response_text = resps[idx]
+            return super().query(prompt, project_dir_arg, max_turns=max_turns)
+
+    return ScriptedSession()
 
 
 @pytest.fixture

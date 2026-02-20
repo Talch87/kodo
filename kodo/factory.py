@@ -30,12 +30,17 @@ def available_backends() -> dict[str, bool]:
     """Detect which worker backends are installed and on PATH."""
     return {
         "claude": shutil.which("claude") is not None,
+        "codex": shutil.which("codex") is not None,
         "cursor": shutil.which("cursor-agent") is not None,
     }
 
 
 def has_claude() -> bool:
     return available_backends()["claude"]
+
+
+def has_codex() -> bool:
+    return available_backends()["codex"]
 
 
 def has_cursor() -> bool:
@@ -136,11 +141,12 @@ def _build_team_saga(
 ) -> TeamConfig:
     """Create the saga team, skipping workers whose backends are unavailable."""
     _has_cursor = has_cursor()
+    _has_codex = has_codex()
     _has_claude = has_claude()
-    if not _has_cursor and not _has_claude:
+    if not _has_cursor and not _has_codex and not _has_claude:
         raise RuntimeError(
             "No worker backends available. Install at least one of: "
-            "claude (Claude Code CLI) or cursor-agent (Cursor CLI)."
+            "claude (Claude Code CLI), cursor-agent (Cursor CLI), or codex (OpenAI Codex CLI)."
         )
 
     team: TeamConfig = {}
@@ -187,6 +193,15 @@ def _build_team_saga(
             timeout_s=tester_timeout_s,
         )
 
+    if _has_codex and "worker_fast" not in team:
+        worker_fast_session = make_session("codex", "o4-mini", budget)
+        team["worker_fast"] = Agent(
+            worker_fast_session,
+            _WORKER_FAST_DESC + _WORKER_FAST_SAGA_EXTRA,
+            max_turns=30,
+            timeout_s=worker_timeout_s,
+        )
+
     if _has_claude:
         worker_smart_session = make_session(
             "claude", "opus", None, fallback_model="sonnet"
@@ -222,17 +237,27 @@ def _build_team_saga(
 def _build_team_mission(budget: float | None = None) -> TeamConfig:
     """Create a mission team, skipping workers whose backends are unavailable."""
     _has_cursor = has_cursor()
+    _has_codex = has_codex()
     _has_claude = has_claude()
-    if not _has_cursor and not _has_claude:
+    if not _has_cursor and not _has_codex and not _has_claude:
         raise RuntimeError(
             "No worker backends available. Install at least one of: "
-            "claude (Claude Code CLI) or cursor-agent (Cursor CLI)."
+            "claude (Claude Code CLI), cursor-agent (Cursor CLI), or codex (OpenAI Codex CLI)."
         )
 
     team: TeamConfig = {}
 
     if _has_cursor:
         worker_fast_session = make_session("cursor", "composer-1.5", budget)
+        team["worker_fast"] = Agent(
+            worker_fast_session,
+            _WORKER_FAST_DESC,
+            max_turns=30,
+            timeout_s=1800,
+        )
+
+    if _has_codex and "worker_fast" not in team:
+        worker_fast_session = make_session("codex", "o4-mini", budget)
         team["worker_fast"] = Agent(
             worker_fast_session,
             _WORKER_FAST_DESC,
@@ -264,17 +289,17 @@ def _build_team_mission(budget: float | None = None) -> TeamConfig:
 
 def _mission_system_prompt() -> str:
     """Build the mission system prompt based on available backends."""
-    _has_cursor = has_cursor()
+    _has_fast = has_cursor() or has_codex()
     _has_claude = has_claude()
 
-    if _has_cursor and _has_claude:
+    if _has_fast and _has_claude:
         workers_desc = (
-            "You have a fast worker (Cursor) and a smart worker "
+            "You have a fast worker and a smart worker "
             "(Claude Code). Use the fast worker for straightforward tasks and the smart "
             "worker for complex reasoning or when the fast worker struggles."
         )
-    elif _has_cursor:
-        workers_desc = "You have a fast worker (Cursor). Use it for all coding tasks."
+    elif _has_fast:
+        workers_desc = "You have a fast worker. Use it for all coding tasks."
     else:
         workers_desc = (
             "You have a smart worker (Claude Code). Use it for all coding tasks."
@@ -309,6 +334,8 @@ def _describe_backends() -> str:
     parts = []
     if has_cursor():
         parts.append("Cursor")
+    if has_codex():
+        parts.append("Codex")
     if has_claude():
         parts.append("Claude Code")
     return " + ".join(parts) if parts else "none"
@@ -316,7 +343,7 @@ def _describe_backends() -> str:
 
 def _saga_description() -> str:
     agents = []
-    if has_cursor():
+    if has_cursor() or has_codex():
         agents.append("fast worker")
     if has_claude():
         agents.append("smart worker")
@@ -330,7 +357,7 @@ def _saga_description() -> str:
 
 def _mission_description() -> str:
     workers = []
-    if has_cursor():
+    if has_cursor() or has_codex():
         workers.append("fast")
     if has_claude():
         workers.append("smart")

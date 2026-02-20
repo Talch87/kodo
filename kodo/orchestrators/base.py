@@ -241,8 +241,6 @@ def verify_done(
         tester_agents.append(("tester", team["tester"]))
     if team.get("tester_browser") and browser_testing:
         tester_agents.append(("tester_browser", team["tester_browser"]))
-    elif team.get("tester_browser") and not browser_testing:
-        log.tprint("[done] skipping tester_browser (not needed for this stage)")
 
     for tester_name, tester_agent in tester_agents:
         try:
@@ -467,6 +465,7 @@ class OrchestratorBase:
     ) -> RunResult:
         from kodo import log
         from kodo.sessions.claude import ClaudeSession
+        from kodo.sessions.codex import CodexSession
         from kodo.sessions.cursor import CursorSession
 
         # Inject resume session IDs into agents before starting
@@ -480,6 +479,8 @@ class OrchestratorBase:
                     sess.resume_session_id = sid
                 elif isinstance(sess, CursorSession):
                     sess._chat_id = sid
+                elif isinstance(sess, CodexSession):
+                    sess._session_id = sid
 
         start_cycle = (resume.completed_cycles if resume else 0) + 1
         prior_summary = resume.prior_summary if resume else ""

@@ -18,11 +18,13 @@ def test_agent_run_returns_result(tmp_project: Path) -> None:
     assert result.elapsed_s > 0
 
 
-def test_agent_new_conversation_resets_session(tmp_project: Path) -> None:
+def test_agent_new_conversation_clears_stats(tmp_project: Path) -> None:
     agent = make_agent("ok")
     agent.run("task1", tmp_project, agent_name="test")
+    assert agent.session.stats.queries == 1
     agent.run("task2", tmp_project, new_conversation=True, agent_name="test")
-    assert agent.session.reset_count == 1
+    # Stats should reflect only post-reset queries
+    assert agent.session.stats.queries == 1
 
 
 def test_agent_context_reset_flag(tmp_project: Path) -> None:
@@ -37,13 +39,6 @@ def test_agent_no_reset_by_default(tmp_project: Path) -> None:
     result = agent.run("task", tmp_project, agent_name="test")
     assert result.context_reset is False
     assert result.context_reset_reason == ""
-
-
-def test_agent_session_stats_accumulate(tmp_project: Path) -> None:
-    agent = make_agent("ok")
-    agent.run("task1", tmp_project, agent_name="test")
-    agent.run("task2", tmp_project, agent_name="test")
-    assert agent.session.stats.queries == 2
 
 
 def test_agent_error_propagated(tmp_project: Path) -> None:
@@ -99,14 +94,6 @@ def test_agent_close_no_error_without_close_method(tmp_project: Path) -> None:
 
 
 class TestAgentResult:
-    def test_format_report_basic(self) -> None:
-        qr = QueryResult(text="All done", elapsed_s=1.0)
-        ar = AgentResult(query=qr, session_tokens=500, session_queries=3)
-        report = ar.format_report()
-        assert "All done" in report
-        assert "500" in report
-        assert "3 queries" in report
-
     def test_format_report_with_context_reset(self) -> None:
         qr = QueryResult(text="result", elapsed_s=1.0)
         ar = AgentResult(

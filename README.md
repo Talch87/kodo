@@ -7,6 +7,7 @@
   <a href="https://github.com/ikamen/kodo/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License"></a>
   <a href="https://docs.anthropic.com/en/docs/claude-code"><img src="https://img.shields.io/badge/Claude_Code-Max-blueviolet?logo=anthropic&logoColor=white" alt="Claude Code"></a>
   <a href="https://cursor.com"><img src="https://img.shields.io/badge/Cursor-supported-orange?logo=cursor&logoColor=white" alt="Cursor"></a>
+  <a href="https://github.com/openai/codex"><img src="https://img.shields.io/badge/Codex-supported-green?logo=openai&logoColor=white" alt="OpenAI Codex"></a>
 </p>
 
 ---
@@ -98,17 +99,18 @@ That's it. `kodo` is now on your PATH.
 
 You need **at least one** agent backend installed:
 
-| Backend | What it does | Install |
-|---------|-------------|---------|
-| 🤖 [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) | Smart workers + architect (Claude Max subscription) | `npm install -g @anthropic-ai/claude-code` |
-| ⚡ [Cursor CLI](https://docs.cursor.com/agent) | Fast workers + testers (Cursor subscription) | Comes with Cursor; enable `cursor-agent` in settings |
+| Backend | Role | Install |
+|---------|------|---------|
+| 🤖 [Claude Code](docs/providers.md#claude-code-smart-workers--architect) | Smart workers + architect | `npm install -g @anthropic-ai/claude-code` |
+| ⚡ [Cursor](docs/providers.md#cursor-fast-workers--testers) | Fast workers + testers | Comes with Cursor; enable `cursor-agent` in settings |
+| 🟢 [OpenAI Codex](docs/providers.md#openai-codex-fast-workers) | Fast workers (alternative to Cursor) | `npm install -g @openai/codex` |
 
-Both are recommended. Claude Code handles complex reasoning, Cursor handles fast iteration and testing.
+Claude Code + one fast backend (Cursor or Codex) is recommended. See [docs/providers.md](docs/providers.md) for detailed setup instructions, authentication, and troubleshooting.
 
-For the **API orchestrator** (Gemini or Claude API), set the relevant key in a `.env` file or environment:
+For the **API orchestrator**, set a key in `.env` or your environment:
 ```bash
-GOOGLE_API_KEY=...     # for gemini-flash/gemini-pro orchestrator
-ANTHROPIC_API_KEY=...  # for API-billed Claude orchestrator
+GOOGLE_API_KEY=...     # Gemini orchestrator (recommended — fast and cheap)
+ANTHROPIC_API_KEY=...  # Claude API orchestrator (alternative)
 ```
 
 ## 🚀 Usage
@@ -167,7 +169,7 @@ nohup kodo --goal-file feature.md --cycles 10 ./my-project > run.log 2>&1 &
  │
  ├── 🔍 architect        Survey codebase, review code, find bugs
  ├── 🧠 worker_smart     Complex implementation (Claude Code)
- ├── ⚡ worker_fast       Quick tasks, iterations (Cursor)
+ ├── ⚡ worker_fast       Quick tasks, iterations (Cursor or Codex)
  ├── 🧪 tester           Run tests, verify behavior
  └── 🌐 tester_browser   Browser-based UI testing
 ```
@@ -179,6 +181,7 @@ kodo/
   sessions/
     base.py                  Session protocol, QueryResult, SessionStats
     claude.py                ClaudeSession (claude-agent-sdk, persistent)
+    codex.py                 CodexSession (codex CLI, persistent)
     cursor.py                CursorSession (cursor-agent CLI, persistent)
   orchestrators/
     base.py                  Orchestrator protocol, CycleResult, RunResult
@@ -190,7 +193,7 @@ kodo/
 
 **Key concepts:**
 
-- **Session** — a stateful conversation with a backend (Claude or Cursor). Tracks token usage, supports reset.
+- **Session** — a stateful conversation with a backend (Claude, Cursor, or Codex). Tracks token usage, supports reset.
 - **Agent** — a prompt + session + turn budget. Call `agent.run(task, project_dir)` to get work done.
 - **Orchestrator** — an LLM that delegates to a team of agents via tool calls:
   - `ClaudeCodeOrchestrator` — runs on Claude Code with agents as MCP tools. Free on Max subscription.

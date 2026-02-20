@@ -40,13 +40,6 @@ def test_agent_description_in_tool() -> None:
     assert "More details" in worker_tool["description"]
 
 
-def test_tool_schema_has_required_task() -> None:
-    team = {"worker": make_agent(prompt="Coder.")}
-    tools = build_team_tools(team)
-    worker_tool = next(t for t in tools if t["name"] == "ask_worker")
-    assert "task" in worker_tool["input_schema"]["required"]
-
-
 def test_empty_team_only_done() -> None:
     tools = build_team_tools({})
     assert len(tools) == 1

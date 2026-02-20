@@ -1,6 +1,6 @@
 """kodo — autonomous goal-driven coding agent."""
 
-__version__ = "0.4.11"
+__version__ = "0.4.12"
 
 from kodo import log
 from kodo.agent import Agent, AgentResult
@@ -59,8 +59,11 @@ def make_session(
     explicitly want API billing for this session.
     """
     from kodo.sessions.claude import ClaudeSession
+    from kodo.sessions.codex import CodexSession
     from kodo.sessions.cursor import CursorSession
 
+    if backend == "codex":
+        return CodexSession(model=model, system_prompt=system_prompt)
     if backend == "cursor":
         return CursorSession(model=model, system_prompt=system_prompt)
     return ClaudeSession(

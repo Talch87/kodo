@@ -229,9 +229,17 @@ def _fmt_cost(c: float) -> str:
 def _bucket_label(b: str) -> str:
     return {
         "api": "API",
-        "claude_subscription": "Claude sub",
-        "cursor_subscription": "Cursor sub",
+        "claude_subscription": "Claude",
+        "codex_subscription": "Codex",
+        "cursor_subscription": "Cursor",
     }.get(b, b)
+
+
+def _trunc(s: str, width: int) -> str:
+    """Truncate *s* to *width*, replacing the last char with '~' if trimmed."""
+    if len(s) <= width:
+        return s
+    return s[: width - 1] + "~"
 
 
 _virtual_cost_note_shown = False
@@ -261,11 +269,11 @@ def print_stats_table(final: bool = False) -> None:
     print(f"  |{sep[1:-1]}|")
 
     for agent, s in sorted(stats.agents.items()):
-        has_tokens = s.cost_bucket != "cursor_subscription"
+        has_tokens = s.cost_bucket not in ("cursor_subscription",)
         in_tok = _fmt_tokens(s.input_tokens) if has_tokens else "-"
         out_tok = _fmt_tokens(s.output_tokens) if has_tokens else "-"
         print(
-            f"  | {agent:<20} {_bucket_label(s.cost_bucket):<10}"
+            f"  | {_trunc(agent, 20):<20} {_trunc(_bucket_label(s.cost_bucket), 10):<10}"
             f" {s.calls:>3} {_fmt_cost(s.cost_usd):>7}"
             f" {in_tok:>5} {out_tok:>5}"
             f" {_fmt_time(s.elapsed_s):>6} {s.errors:>3} |"
@@ -274,7 +282,7 @@ def print_stats_table(final: bool = False) -> None:
     # Orchestrator row
     if stats.orchestrator_cost_usd > 0:
         print(
-            f"  | {'orchestrator':<20} {_bucket_label(stats.orchestrator_bucket):<10}"
+            f"  | {'orchestrator':<20} {_trunc(_bucket_label(stats.orchestrator_bucket), 10):<10}"
             f" {'':>3} {_fmt_cost(stats.orchestrator_cost_usd):>7}"
             f" {'':>5} {'':>5} {'':>6} {'':>3} |"
         )
@@ -396,7 +404,7 @@ def parse_run(log_file: Path) -> RunState | None:
             agent_name = evt["agent"]
             if agent_name:
                 for key in list(agent_session_ids.keys()):
-                    if key in ("claude", "cursor"):
+                    if key in ("claude", "codex", "cursor"):
                         agent_session_ids[agent_name] = agent_session_ids.pop(key)
 
     if run_start is None or cli_args is None:
