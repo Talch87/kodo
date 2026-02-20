@@ -1,7 +1,7 @@
 """Structured JSONL logging for run reconstruction.
 
 Every event is a single JSON line with at least: timestamp, event, and contextual fields.
-Log file is created per run in the project directory under .kodo/logs/.
+Each run gets its own directory under .kodo/runs/<run_id>/.
 """
 
 from __future__ import annotations
@@ -19,6 +19,62 @@ _log_file: Path | None = None
 _run_id: str | None = None
 _start_time: float | None = None
 _lock = threading.Lock()
+
+
+# ---------------------------------------------------------------------------
+# Per-run directory
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RunDir:
+    """Path accessor for a single run's folder under .kodo/runs/<run_id>/."""
+
+    project_dir: Path
+    run_id: str
+
+    @staticmethod
+    def create(project_dir: Path, run_id: str | None = None) -> "RunDir":
+        rid = run_id or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        rd = RunDir(project_dir=project_dir, run_id=rid)
+        rd.root.mkdir(parents=True, exist_ok=True)
+        return rd
+
+    @staticmethod
+    def from_log_file(log_file: Path, project_dir: Path) -> "RunDir":
+        """Construct a RunDir from an existing log file path."""
+        return RunDir(project_dir=project_dir, run_id=_extract_run_id(log_file))
+
+    @property
+    def root(self) -> Path:
+        return self.project_dir / ".kodo" / "runs" / self.run_id
+
+    @property
+    def log_file(self) -> Path:
+        return self.root / "run.jsonl"
+
+    @property
+    def goal_file(self) -> Path:
+        return self.root / "goal.md"
+
+    @property
+    def goal_refined_file(self) -> Path:
+        return self.root / "goal-refined.md"
+
+    @property
+    def goal_plan_file(self) -> Path:
+        return self.root / "goal-plan.json"
+
+    @property
+    def config_file(self) -> Path:
+        return self.root / "config.json"
+
+
+def _extract_run_id(log_file: Path) -> str:
+    """Extract run_id from a log file path. Handles both old and new layouts."""
+    if log_file.name == "run.jsonl":
+        return log_file.parent.name  # .kodo/runs/<run_id>/run.jsonl
+    return log_file.stem  # .kodo/logs/<run_id>.jsonl
 
 
 # ---------------------------------------------------------------------------
@@ -92,22 +148,21 @@ class RunStats:
 _run_stats = RunStats()
 
 
-def init(project_dir: Path, run_id: str | None = None) -> Path:
+def init(run_dir: RunDir) -> Path:
     """Initialize logging for a run. Returns the log file path."""
     global _log_file, _run_id, _start_time, _run_stats, _virtual_cost_note_shown
 
     from kodo import __version__
 
-    _run_id = run_id or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    _run_id = run_dir.run_id
     _start_time = time.monotonic()
     _run_stats = RunStats()
     _virtual_cost_note_shown = False
 
-    log_dir = project_dir / ".kodo" / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    _log_file = log_dir / f"{_run_id}.jsonl"
+    run_dir.root.mkdir(parents=True, exist_ok=True)
+    _log_file = run_dir.log_file
 
-    emit("run_init", project_dir=str(project_dir), version=__version__)
+    emit("run_init", project_dir=str(run_dir.project_dir), version=__version__)
     return _log_file
 
 
@@ -348,7 +403,7 @@ def parse_run(log_file: Path) -> RunState | None:
         return None
 
     return RunState(
-        run_id=log_file.stem,
+        run_id=_extract_run_id(log_file),
         log_file=log_file,
         goal=run_start["goal"],
         orchestrator=run_start["orchestrator"],
@@ -371,16 +426,30 @@ def parse_run(log_file: Path) -> RunState | None:
 
 
 def find_incomplete_runs(project_dir: Path) -> list[RunState]:
-    """Scan .kodo/logs/*.jsonl for incomplete runs, newest first.
+    """Scan for incomplete runs, newest first.
 
+    Checks both new (.kodo/runs/*/run.jsonl) and legacy (.kodo/logs/*.jsonl) layouts.
     An incomplete run has a run_start + at least 1 cycle_end but no run_end.
     """
+    candidates: list[Path] = []
+
+    # New layout: .kodo/runs/*/run.jsonl
+    runs_dir = project_dir / ".kodo" / "runs"
+    if runs_dir.exists():
+        for d in sorted(runs_dir.iterdir(), reverse=True):
+            if d.is_dir():
+                f = d / "run.jsonl"
+                if f.exists():
+                    candidates.append(f)
+
+    # Legacy layout: .kodo/logs/*.jsonl
     log_dir = project_dir / ".kodo" / "logs"
-    if not log_dir.exists():
-        return []
+    if log_dir.exists():
+        for f in sorted(log_dir.glob("*.jsonl"), reverse=True):
+            candidates.append(f)
 
     runs: list[RunState] = []
-    for f in sorted(log_dir.glob("*.jsonl"), reverse=True):
+    for f in candidates:
         state = parse_run(f)
         if state is None:
             continue
@@ -395,7 +464,7 @@ def init_append(log_file: Path) -> Path:
     global _log_file, _run_id, _start_time, _run_stats
 
     _log_file = log_file
-    _run_id = log_file.stem
+    _run_id = _extract_run_id(log_file)
     _start_time = time.monotonic()
     _run_stats = RunStats()
 

@@ -6,17 +6,18 @@ import json
 from pathlib import Path
 
 from kodo import log
+from kodo.log import RunDir
 
 
 def test_init_creates_log_file(tmp_path: Path):
-    log_file = log.init(tmp_path, run_id="test_run")
+    log_file = log.init(RunDir.create(tmp_path, "test_run"))
     assert log_file.exists()
-    assert log_file.parent == tmp_path / ".kodo" / "logs"
-    assert log_file.name == "test_run.jsonl"
+    assert log_file.parent == tmp_path / ".kodo" / "runs" / "test_run"
+    assert log_file.name == "run.jsonl"
 
 
 def test_emit_writes_json_lines(tmp_path: Path):
-    log.init(tmp_path, run_id="emit_test")
+    log.init(RunDir.create(tmp_path, "emit_test"))
     log.emit("my_event", foo="bar", count=42)
     log_file = log.get_log_file()
     lines = log_file.read_text().strip().split("\n")

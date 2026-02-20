@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from kodo import log
+from kodo.log import RunDir
 from kodo.agent import Agent
 from kodo.orchestrators.api import ApiOrchestrator, _messages_to_text
 from tests.conftest import FakeRunResult, FakeSession
@@ -18,7 +19,7 @@ def _make_team():
 
 def test_done_with_success_false(tmp_path: Path):
     """Calling done(success=False) should mark finished but not successful."""
-    log.init(tmp_path, run_id="done_fail")
+    log.init(RunDir.create(tmp_path, "done_fail"))
 
     def fake_run_sync(prompt, *, usage_limits=None):
         for tool in agent_tools:
@@ -45,7 +46,7 @@ def test_done_with_success_false(tmp_path: Path):
 
 def test_agent_crash_returns_error_string(tmp_path: Path):
     """If an agent tool crashes, the orchestrator should get an error string, not crash itself."""
-    log.init(tmp_path, run_id="agent_crash")
+    log.init(RunDir.create(tmp_path, "agent_crash"))
     crash_session = FakeSession(response_text="ok")
     crash_agent = Agent(crash_session, "crasher", max_turns=5)
 
@@ -141,7 +142,7 @@ def test_messages_to_text_empty_list():
 
 def test_cost_calculation_with_unknown_model(tmp_path: Path):
     """If the model isn't in the pricing table, cost should be 0 (not crash)."""
-    log.init(tmp_path, run_id="unknown_pricing")
+    log.init(RunDir.create(tmp_path, "unknown_pricing"))
 
     def fake_run_sync(prompt, *, usage_limits=None):
         for tool in agent_tools:

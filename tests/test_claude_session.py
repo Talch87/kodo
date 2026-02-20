@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 
 from kodo import log
+from kodo.log import RunDir
 from kodo.sessions.claude import ClaudeSession, _extract_tokens
 from tests.mocks.claude_sdk import (
     MockClaudeAgentOptions,
@@ -40,7 +41,7 @@ def _install_mock_sdk(responses=None):
 
 
 def test_query_returns_result(tmp_path: Path):
-    log.init(tmp_path, run_id="claude_query")
+    log.init(RunDir.create(tmp_path, "claude_query"))
     resp = MockResultMessage(
         result="Hello world",
         num_turns=2,
@@ -66,7 +67,7 @@ def test_query_returns_result(tmp_path: Path):
 
 
 def test_stats_accumulate(tmp_path: Path):
-    log.init(tmp_path, run_id="claude_stats")
+    log.init(RunDir.create(tmp_path, "claude_stats"))
     r1 = MockResultMessage(
         result="r1",
         total_cost_usd=0.01,
@@ -120,7 +121,7 @@ def test_stats_accumulate(tmp_path: Path):
 
 
 def test_reset_disconnects(tmp_path: Path):
-    log.init(tmp_path, run_id="claude_reset")
+    log.init(RunDir.create(tmp_path, "claude_reset"))
     mock_client, fake_modules = _install_mock_sdk()
 
     with patch.dict(sys.modules, fake_modules):
@@ -144,7 +145,7 @@ def test_extract_tokens_variants():
 
 
 def test_api_key_stripped_by_default(tmp_path: Path, monkeypatch):
-    log.init(tmp_path, run_id="claude_key_strip")
+    log.init(RunDir.create(tmp_path, "claude_key_strip"))
 
     keys_during_init = []
 
@@ -185,7 +186,7 @@ def test_api_key_stripped_by_default(tmp_path: Path, monkeypatch):
 
 
 def test_api_key_kept_when_explicit(tmp_path: Path, monkeypatch):
-    log.init(tmp_path, run_id="claude_key_keep")
+    log.init(RunDir.create(tmp_path, "claude_key_keep"))
 
     keys_during_init = []
 

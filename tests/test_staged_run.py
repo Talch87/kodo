@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from kodo import log
+from kodo.log import RunDir
 from kodo.orchestrators.base import (
     CycleResult,
     GoalPlan,
@@ -129,7 +130,7 @@ class FakeOrchestrator(OrchestratorBase):
 
 @pytest.fixture
 def tmp_project(tmp_path: Path) -> Path:
-    log.init(tmp_path)
+    log.init(RunDir.create(tmp_path))
     return tmp_path
 
 
@@ -548,12 +549,12 @@ def test_parse_goal_plan_no_context_returns_empty():
 def test_load_goal_plan(tmp_path):
     from kodo.cli import _load_goal_plan
 
-    # No file → None
-    assert _load_goal_plan(tmp_path) is None
+    run_dir = RunDir.create(tmp_path, "plan_test")
 
-    # Valid file
-    kodo_dir = tmp_path / ".kodo"
-    kodo_dir.mkdir()
+    # No file → None
+    assert _load_goal_plan(run_dir) is None
+
+    # Valid file in run directory
     plan_data = {
         "context": "Test",
         "stages": [
@@ -565,11 +566,11 @@ def test_load_goal_plan(tmp_path):
             },
         ],
     }
-    (kodo_dir / "goal-plan.json").write_text(json.dumps(plan_data))
-    plan = _load_goal_plan(tmp_path)
+    run_dir.goal_plan_file.write_text(json.dumps(plan_data))
+    plan = _load_goal_plan(run_dir)
     assert plan is not None
     assert len(plan.stages) == 1
 
     # Invalid JSON → None
-    (kodo_dir / "goal-plan.json").write_text("not json")
-    assert _load_goal_plan(tmp_path) is None
+    run_dir.goal_plan_file.write_text("not json")
+    assert _load_goal_plan(run_dir) is None

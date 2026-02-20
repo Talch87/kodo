@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from kodo import log
+from kodo.log import RunDir
 from kodo.orchestrators.base import CycleResult, OrchestratorBase, ResumeState
 
 from tests.conftest import make_agent
@@ -46,7 +47,7 @@ class FakeOrchestrator(OrchestratorBase):
 @pytest.fixture
 def tmp_project(tmp_path: Path) -> Path:
     """Initialize logging and return a temp project dir."""
-    log.init(tmp_path)
+    log.init(RunDir.create(tmp_path))
     return tmp_path
 
 

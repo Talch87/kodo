@@ -23,6 +23,7 @@ from kodo.factory import (
     has_cursor,
     check_api_key,
 )
+from kodo.log import RunDir
 from kodo.orchestrators.base import GoalPlan, GoalStage, ResumeState
 
 
@@ -44,17 +45,7 @@ edge cases, architecture preferences, and scope
 Start by acknowledging the goal briefly, then ask your first questions.
 Keep the conversation focused and practical — don't over-interview."""
 
-INTAKE_PROMPT = _INTAKE_PREAMBLE.format(
-    purpose="",
-    output="a refined, detailed goal to .kodo/goal-refined.md",
-)
-
-INTAKE_STAGES_PROMPT = (
-    _INTAKE_PREAMBLE.format(
-        purpose=" into an ordered list of stages",
-        output="a structured goal plan to .kodo/goal-plan.json",
-    )
-    + """
+_INTAKE_STAGES_SUFFIX = """
 
 The JSON format MUST be:
 {
@@ -79,7 +70,21 @@ Guidelines for staging:
 - Order stages so later ones build on earlier ones
 - Trivially simple goals can be a single stage
 - Each stage should be completable in 1-3 orchestrator cycles"""
-)
+
+
+def _build_intake_prompt(output_path: str, staged: bool) -> str:
+    """Build intake prompt with the correct output file path."""
+    if staged:
+        prompt = _INTAKE_PREAMBLE.format(
+            purpose=" into an ordered list of stages",
+            output=f"a structured goal plan to {output_path}",
+        )
+        return prompt + _INTAKE_STAGES_SUFFIX
+    else:
+        return _INTAKE_PREAMBLE.format(
+            purpose="",
+            output=f"a refined, detailed goal to {output_path}",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +147,7 @@ def get_goal() -> str:
 
 def run_intake_chat(
     backend: str,
-    project_dir: Path,
+    run_dir: RunDir,
     goal_text: str,
     staged: bool = False,
 ) -> GoalPlan | str | None:
@@ -151,22 +156,22 @@ def run_intake_chat(
     Returns GoalPlan if staged + file written, refined goal string if
     single + file written, or None if user bailed.
     """
-    selfo_dir = project_dir / ".kodo"
-    selfo_dir.mkdir(parents=True, exist_ok=True)
+    run_dir.root.mkdir(parents=True, exist_ok=True)
 
-    goal_path = selfo_dir / "goal.md"
+    goal_path = run_dir.goal_file
     goal_path.write_text(goal_text)
     print(f"\nGoal saved to {goal_path}")
 
-    prompt = INTAKE_STAGES_PROMPT if staged else INTAKE_PROMPT
+    output_file = run_dir.goal_plan_file if staged else run_dir.goal_refined_file
+    output_rel = str(output_file.relative_to(run_dir.project_dir))
+    prompt = _build_intake_prompt(output_rel, staged)
     model = "opus" if backend == "claude" else "composer-1.5"
     session = make_session(backend, model, budget=None, system_prompt=prompt)
-
-    output_file = selfo_dir / ("goal-plan.json" if staged else "goal-refined.md")
 
     print("\n--- Intake interview (type /done or empty line to finish) ---")
 
     # First message — agent explores the project and asks clarifying questions
+    project_dir = run_dir.project_dir
     initial = f"Here's my project goal:\n\n{goal_text}"
     with _Spinner("Reviewing project"):
         result = session.query(initial, project_dir, max_turns=10)
@@ -267,11 +272,14 @@ def _parse_goal_plan(raw: dict) -> GoalPlan:
     return GoalPlan(context=context, stages=stages)
 
 
-def _load_goal_plan(project_dir: Path) -> GoalPlan | None:
-    """Load an existing goal-plan.json if present and valid."""
-    plan_path = project_dir / ".kodo" / "goal-plan.json"
+def _load_goal_plan(run_dir: RunDir) -> GoalPlan | None:
+    """Load an existing goal-plan.json from the run directory."""
+    plan_path = run_dir.goal_plan_file
     if not plan_path.exists():
-        return None
+        # Legacy fallback: check .kodo/goal-plan.json
+        plan_path = run_dir.project_dir / ".kodo" / "goal-plan.json"
+        if not plan_path.exists():
+            return None
     try:
         raw = json.loads(plan_path.read_text())
     except json.JSONDecodeError:
@@ -419,7 +427,7 @@ def select_params() -> dict:
 
 
 def _config_path(project_dir: Path) -> Path:
-    return project_dir / ".kodo" / "last-config.json"
+    return project_dir / ".kodo" / "config.json"
 
 
 def _save_config(project_dir: Path, params: dict) -> None:
@@ -431,6 +439,11 @@ def _save_config(project_dir: Path, params: dict) -> None:
 def _load_or_select_params(project_dir: Path) -> dict:
     """Offer to reuse previous config, or run interactive selection."""
     cfg_path = _config_path(project_dir)
+    # Legacy fallback
+    if not cfg_path.exists():
+        legacy = project_dir / ".kodo" / "last-config.json"
+        if legacy.exists():
+            cfg_path = legacy
     required_keys = {
         "mode",
         "orchestrator",
@@ -465,14 +478,21 @@ def _load_or_select_params(project_dir: Path) -> dict:
 
 
 def launch_run(
-    project_dir: Path,
+    run_dir: RunDir,
     goal_text: str,
     params: dict,
     plan: GoalPlan | None = None,
 ) -> None:
     """Build team + orchestrator and run."""
-    log_path = log.init(project_dir)
+    # Snapshot config and goal into the run directory
+    run_dir.config_file.write_text(json.dumps(params, indent=2))
+    if not run_dir.goal_file.exists():
+        run_dir.goal_file.write_text(goal_text)
+
+    log_path = log.init(run_dir)
     log.emit("cli_args", **params, goal_text=goal_text, has_plan=plan is not None)
+
+    project_dir = run_dir.project_dir
 
     mode = get_mode(params["mode"])
     team = mode.build_team(params["budget_per_step"])
@@ -519,9 +539,11 @@ def launch_run(
         print(f"  {result.summary[:300]}")
 
 
-def launch_resume(project_dir: Path, state: log.RunState) -> None:
+def launch_resume(run_dir: RunDir, state: log.RunState) -> None:
     """Resume an interrupted run from its parsed RunState."""
     log.init_append(state.log_file)
+
+    project_dir = run_dir.project_dir
 
     # Reconstruct params from RunState
     params = {
@@ -553,7 +575,7 @@ def launch_resume(project_dir: Path, state: log.RunState) -> None:
     # Load goal plan if this was a staged run
     plan: GoalPlan | None = None
     if state.has_stages:
-        plan = _load_goal_plan(Path(state.project_dir))
+        plan = _load_goal_plan(run_dir)
 
     print(f"\nResuming run: {state.run_id}")
     print(f"Mode: {mode.name} — {mode.description}")
@@ -603,7 +625,7 @@ def main() -> None:
         sys.exit(130)
 
 
-def _offer_intake(project_dir: Path, goal_text: str) -> GoalPlan | str | None:
+def _offer_intake(run_dir: RunDir, goal_text: str) -> GoalPlan | str | None:
     """Offer intake interview, letting user pick backend. Returns result or None."""
     backends: list[str] = []
     if has_claude():
@@ -631,7 +653,90 @@ def _offer_intake(project_dir: Path, goal_text: str) -> GoalPlan | str | None:
         stage_choice = input("Break into stages? [y/N] ").strip().lower()
         staged = stage_choice == "y"
 
-    return run_intake_chat(backend, project_dir, goal_text, staged=staged)
+    return run_intake_chat(backend, run_dir, goal_text, staged=staged)
+
+
+def _build_params_from_flags(args, project_dir: Path) -> dict:
+    """Build config dict from CLI flags, falling back to mode defaults."""
+    mode_name = args.mode or "saga"
+    mode = get_mode(mode_name)
+
+    orch_model = args.orchestrator_model or "gemini-flash"
+
+    if args.orchestrator:
+        orchestrator = args.orchestrator
+    elif orch_model.startswith("gemini"):
+        orchestrator = "api"
+    elif not has_claude():
+        orchestrator = "api"
+    else:
+        orchestrator = "claude-code"
+
+    key_err = check_api_key(orchestrator, orch_model)
+    if key_err:
+        print(f"Error: {key_err}")
+        sys.exit(1)
+
+    params = {
+        "mode": mode_name,
+        "orchestrator": orchestrator,
+        "orchestrator_model": orch_model,
+        "max_exchanges": args.exchanges or mode.default_max_exchanges,
+        "max_cycles": args.cycles or mode.default_max_cycles,
+        "budget_per_step": args.budget,
+    }
+    _save_config(project_dir, params)
+    return params
+
+
+def run_intake_noninteractive(
+    run_dir: RunDir,
+    goal_text: str,
+) -> GoalPlan | None:
+    """Non-interactive intake: send goal, get staged plan back, no conversation."""
+    run_dir.root.mkdir(parents=True, exist_ok=True)
+
+    goal_path = run_dir.goal_file
+    goal_path.write_text(goal_text)
+
+    if has_claude():
+        backend, model = "claude", "opus"
+    elif has_cursor():
+        backend, model = "cursor", "composer-1.5"
+    else:
+        print("Skipping intake (no backends available).")
+        return None
+
+    output_file = run_dir.goal_plan_file
+    output_rel = str(output_file.relative_to(run_dir.project_dir))
+    prompt = _build_intake_prompt(output_rel, staged=True) + (
+        "\n\nIMPORTANT: This is a non-interactive session. "
+        "Do NOT ask clarifying questions. Analyze the project and goal, "
+        "make reasonable assumptions, and write the goal-plan.json file immediately."
+    )
+    session = make_session(backend, model, budget=None, system_prompt=prompt)
+
+    project_dir = run_dir.project_dir
+    initial = f"Here's my project goal:\n\n{goal_text}"
+    print("Running intake (non-interactive)...")
+    with _Spinner("Analyzing project and creating plan"):
+        result = session.query(initial, project_dir, max_turns=10)
+    print(f"\n{result.text}\n")
+
+    if not output_file.exists():
+        with _Spinner("Finalizing plan"):
+            result = session.query(
+                "Please write the goal-plan.json file now based on your analysis.",
+                project_dir,
+                max_turns=10,
+            )
+        print(f"\n{result.text}\n")
+
+    if output_file.exists():
+        return _read_intake_output(output_file, staged=True)
+
+    print("Warning: intake did not produce a plan. Proceeding without stages.")
+    return None
 
 
 def _main_inner() -> None:
@@ -647,6 +752,32 @@ def _main_inner() -> None:
         metavar="RUN_ID",
         help="Resume an interrupted run. No value = latest incomplete run.",
     )
+
+    # Non-interactive goal input
+    goal_group = parser.add_mutually_exclusive_group()
+    goal_group.add_argument(
+        "--goal", type=str, default=None,
+        help="Goal text (inline). Enables non-interactive mode.",
+    )
+    goal_group.add_argument(
+        "--goal-file", type=str, default=None,
+        help="Path to a file containing the goal text. Enables non-interactive mode.",
+    )
+
+    # Non-interactive config flags
+    parser.add_argument("--mode", type=str, default=None, choices=["saga", "mission"])
+    parser.add_argument("--exchanges", type=int, default=None,
+                        help="Max exchanges per cycle")
+    parser.add_argument("--cycles", type=int, default=None, help="Max cycles")
+    parser.add_argument("--orchestrator", type=str, default=None,
+                        choices=["api", "claude-code"])
+    parser.add_argument("--orchestrator-model", type=str, default=None,
+                        choices=["opus", "sonnet", "gemini-pro", "gemini-flash"])
+    parser.add_argument("--budget", type=float, default=None,
+                        help="Budget per step in USD")
+    parser.add_argument("--skip-intake", action="store_true", default=False,
+                        help="Skip intake interview, use goal as-is")
+
     parser.add_argument(
         "project_dir",
         nargs="?",
@@ -655,7 +786,13 @@ def _main_inner() -> None:
     )
     args = parser.parse_args()
 
+    non_interactive = args.goal is not None or args.goal_file is not None
+
     _print_banner()
+
+    if non_interactive and args.resume is not None:
+        print("Error: --resume cannot be used with --goal/--goal-file")
+        sys.exit(1)
 
     project_dir = Path(args.project_dir)
     project_dir.mkdir(parents=True, exist_ok=True)
@@ -671,9 +808,15 @@ def _main_inner() -> None:
                 sys.exit(1)
             state = runs[0]
         else:
-            log_file = project_dir / ".kodo" / "logs" / f"{args.resume}.jsonl"
-            if not log_file.exists():
-                print(f"Log file not found: {log_file}")
+            # Check new layout first, then legacy
+            run_log = project_dir / ".kodo" / "runs" / args.resume / "run.jsonl"
+            legacy_log = project_dir / ".kodo" / "logs" / f"{args.resume}.jsonl"
+            if run_log.exists():
+                log_file = run_log
+            elif legacy_log.exists():
+                log_file = legacy_log
+            else:
+                print(f"Run not found: {args.resume}")
                 sys.exit(1)
             state = log.parse_run(log_file)
             if state is None:
@@ -687,80 +830,110 @@ def _main_inner() -> None:
             print("Aborted.")
             sys.exit(0)
 
-        launch_resume(project_dir, state)
+        run_dir = RunDir.from_log_file(state.log_file, project_dir)
+        launch_resume(run_dir, state)
         return
 
     # 1. Get goal
-    goal_file = next(
-        (p for p in project_dir.iterdir() if p.name.lower() == "goal.md"), None
-    )
-
-    if goal_file is not None:
-        goal_text = goal_file.read_text().strip()
-        print(f"\nFound existing goal in {goal_file}:")
-        print("-" * 40)
-        print(goal_text[:500])
-        if len(goal_text) > 500:
-            print("...")
-        print("-" * 40)
-        use_existing = input("Use this goal? [Y/n] ").strip().lower()
-        if use_existing in ("n", "no"):
-            goal_text = get_goal()
+    if non_interactive:
+        if args.goal:
+            goal_text = args.goal
+        else:
+            goal_path = Path(args.goal_file)
+            if not goal_path.exists():
+                print(f"Error: goal file not found: {goal_path}")
+                sys.exit(1)
+            goal_text = goal_path.read_text().strip()
+            if not goal_text:
+                print("Error: goal file is empty.")
+                sys.exit(1)
     else:
-        goal_text = get_goal()
+        goal_file = next(
+            (p for p in project_dir.iterdir() if p.name.lower() == "goal.md"), None
+        )
+        if goal_file is not None:
+            goal_text = goal_file.read_text().strip()
+            print(f"\nFound existing goal in {goal_file}:")
+            print("-" * 40)
+            print(goal_text[:500])
+            if len(goal_text) > 500:
+                print("...")
+            print("-" * 40)
+            use_existing = input("Use this goal? [Y/n] ").strip().lower()
+            if use_existing in ("n", "no"):
+                goal_text = get_goal()
+        else:
+            goal_text = get_goal()
 
-    # 2. Select parameters (or reuse previous config)
-    params = _load_or_select_params(project_dir)
+    # 2. Select parameters
+    if non_interactive:
+        params = _build_params_from_flags(args, project_dir)
+    else:
+        params = _load_or_select_params(project_dir)
 
-    # 3. Intake interview (uses Session abstraction — works with any backend)
+    # 3. Create run directory
+    run_dir = RunDir.create(project_dir)
+
+    # 4. Intake / goal plan
     plan: GoalPlan | None = None
 
-    # Check for existing goal plan first
-    existing_plan = _load_goal_plan(project_dir)
-    if existing_plan:
-        print(f"\nFound existing goal plan ({len(existing_plan.stages)} stages):")
-        print("-" * 40)
-        for s in existing_plan.stages:
-            print(f"  {s.index}. {s.name}")
-            if s.acceptance_criteria:
-                print(f"     Done when: {s.acceptance_criteria[:100]}")
-        print("-" * 40)
-        use_plan = input("Use this goal plan? [Y/n] ").strip().lower()
-        if not use_plan or use_plan == "y":
+    if non_interactive:
+        existing_plan = _load_goal_plan(run_dir)
+        if existing_plan:
             plan = existing_plan
-            # Also load the refined goal if present
+            print(f"Using existing goal plan ({len(plan.stages)} stages)")
+        elif not args.skip_intake:
+            plan = run_intake_noninteractive(run_dir, goal_text)
+    else:
+        # Check for existing goal plan first
+        existing_plan = _load_goal_plan(run_dir)
+        if existing_plan:
+            print(f"\nFound existing goal plan ({len(existing_plan.stages)} stages):")
+            print("-" * 40)
+            for s in existing_plan.stages:
+                print(f"  {s.index}. {s.name}")
+                if s.acceptance_criteria:
+                    print(f"     Done when: {s.acceptance_criteria[:100]}")
+            print("-" * 40)
+            use_plan = input("Use this goal plan? [Y/n] ").strip().lower()
+            if not use_plan or use_plan == "y":
+                plan = existing_plan
+                # Check legacy location for refined goal
+                refined_path = project_dir / ".kodo" / "goal-refined.md"
+                if refined_path.exists():
+                    goal_text = refined_path.read_text().strip() or goal_text
+
+        if plan is None:
+            # Check for refined goal from previous runs (legacy location)
             refined_path = project_dir / ".kodo" / "goal-refined.md"
             if refined_path.exists():
-                goal_text = refined_path.read_text().strip() or goal_text
+                refined = refined_path.read_text().strip()
+                if refined:
+                    print("\nFound refined goal from previous intake:")
+                    print("-" * 40)
+                    print(refined[:500])
+                    if len(refined) > 500:
+                        print("...")
+                    print("-" * 40)
+                    use_refined = (
+                        input("Use this refined goal? [Y/n] ").strip().lower()
+                    )
+                    if not use_refined or use_refined == "y":
+                        goal_text = refined
+                    else:
+                        intake_result = _offer_intake(run_dir, goal_text)
+                        if isinstance(intake_result, GoalPlan):
+                            plan = intake_result
+                        elif isinstance(intake_result, str):
+                            goal_text = intake_result
+            else:
+                intake_result = _offer_intake(run_dir, goal_text)
+                if isinstance(intake_result, GoalPlan):
+                    plan = intake_result
+                elif isinstance(intake_result, str):
+                    goal_text = intake_result
 
-    if plan is None:
-        refined_path = project_dir / ".kodo" / "goal-refined.md"
-        if refined_path.exists():
-            refined = refined_path.read_text().strip()
-            if refined:
-                print("\nFound refined goal from previous intake:")
-                print("-" * 40)
-                print(refined[:500])
-                if len(refined) > 500:
-                    print("...")
-                print("-" * 40)
-                use_refined = input("Use this refined goal? [Y/n] ").strip().lower()
-                if not use_refined or use_refined == "y":
-                    goal_text = refined
-                else:
-                    intake_result = _offer_intake(project_dir, goal_text)
-                    if isinstance(intake_result, GoalPlan):
-                        plan = intake_result
-                    elif isinstance(intake_result, str):
-                        goal_text = intake_result
-        else:
-            intake_result = _offer_intake(project_dir, goal_text)
-            if isinstance(intake_result, GoalPlan):
-                plan = intake_result
-            elif isinstance(intake_result, str):
-                goal_text = intake_result
-
-    # 4. Confirm
+    # 5. Summary and confirm
     mode = get_mode(params["mode"])
     print("\n" + "=" * 60)
     print("  READY TO LAUNCH")
@@ -779,20 +952,21 @@ def _main_inner() -> None:
     if params["budget_per_step"]:
         print(f"  Budget/step:  ${params['budget_per_step']:.2f}")
     print()
-    print("  WARNING: Agents run with full permissions (bypass mode).")
-    print("  They will create, modify, and delete files — primarily in")
-    print(f"  {project_dir}")
-    print("  but they CAN access any file on your system (install deps,")
-    print("  edit configs, etc). Make sure you have a git commit or backup.")
-    print()
 
-    confirm = input("Proceed? [Y/n] ").strip().lower()
-    if confirm in ("n", "no"):
-        print("Aborted.")
-        sys.exit(0)
+    if not non_interactive:
+        print("  WARNING: Agents run with full permissions (bypass mode).")
+        print("  They will create, modify, and delete files — primarily in")
+        print(f"  {project_dir}")
+        print("  but they CAN access any file on your system (install deps,")
+        print("  edit configs, etc). Make sure you have a git commit or backup.")
+        print()
+        confirm = input("Proceed? [Y/n] ").strip().lower()
+        if confirm in ("n", "no"):
+            print("Aborted.")
+            sys.exit(0)
 
-    # 5. Launch
-    launch_run(project_dir, goal_text, params, plan=plan)
+    # 6. Launch
+    launch_run(run_dir, goal_text, params, plan=plan)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ import threading
 from pathlib import Path
 
 from kodo import log
+from kodo.log import RunDir
 
 
 def test_emit_before_init_is_noop():
@@ -21,7 +22,7 @@ def test_emit_before_init_is_noop():
 
 def test_concurrent_emits_dont_corrupt(tmp_path: Path):
     """Multiple threads emitting simultaneously should produce valid JSONL."""
-    log.init(tmp_path, run_id="concurrent")
+    log.init(RunDir.create(tmp_path, "concurrent"))
     errors = []
 
     def writer(thread_id):
@@ -49,9 +50,9 @@ def test_concurrent_emits_dont_corrupt(tmp_path: Path):
 
 def test_init_twice_switches_log_file(tmp_path: Path):
     """Calling init a second time should switch to a new log file."""
-    f1 = log.init(tmp_path, run_id="run1")
+    f1 = log.init(RunDir.create(tmp_path, "run1"))
     log.emit("event_in_run1")
-    f2 = log.init(tmp_path, run_id="run2")
+    f2 = log.init(RunDir.create(tmp_path, "run2"))
     log.emit("event_in_run2")
 
     assert f1 != f2
@@ -78,7 +79,7 @@ def test_emit_with_path_and_dataclass_values(tmp_path: Path):
         name: str
         count: int
 
-    log.init(tmp_path, run_id="serialize")
+    log.init(RunDir.create(tmp_path, "serialize"))
     log.emit("complex", path=tmp_path / "foo", info=Info(name="x", count=3))
 
     lines = log.get_log_file().read_text().strip().split("\n")

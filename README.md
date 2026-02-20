@@ -118,8 +118,10 @@ ANTHROPIC_API_KEY=...  # for API-billed Claude orchestrator
 kodo                     # run in current directory
 kodo ./my-project        # run in specific directory
 
-# Non-interactive (for scripting)
-python -m kodo goal.md ./my-project --mode saga --max-cycles 3
+# Non-interactive (for scripting, CI, overnight cron jobs)
+kodo --goal 'Build a REST API for user management' ./my-project
+kodo --goal-file requirements.md ./my-project
+kodo --goal 'Build X' --mode saga --exchanges 50 --cycles 10 ./my-project
 
 # Resume an interrupted run (looks in project's .kodo/logs/)
 kodo --resume                       # resume latest incomplete run in current dir
@@ -127,12 +129,34 @@ kodo ./my-project --resume          # resume latest in specific project
 kodo --resume 20260218_205503       # resume specific run by ID
 ```
 
+### Interactive mode
+
 The interactive CLI will:
 1. Ask for your goal (or reuse an existing `goal.md`)
 2. Optionally refine it via a Claude interview
 3. Let you pick mode, orchestrator, and limits
 4. Show a summary and ask for confirmation before starting
 5. Print a live progress table as agents work
+
+### Non-interactive mode
+
+Passing `--goal` or `--goal-file` enables non-interactive mode — no prompts, no confirmations. The AI still breaks down your goal into stages (unless `--skip-intake` is set), but without asking clarifying questions.
+
+```bash
+# All flags (with defaults shown)
+kodo --goal 'Build X' \
+     --mode saga \                        # saga (default) or mission
+     --exchanges 30 \                     # per cycle (default: mode-specific)
+     --cycles 5 \                         # total cycles (default: mode-specific)
+     --orchestrator api \                 # api (default) or claude-code
+     --orchestrator-model gemini-flash \  # opus, sonnet, gemini-pro, gemini-flash
+     --budget 5.00 \                      # per-step USD limit (default: none)
+     --skip-intake \                      # skip AI goal refinement
+     ./my-project
+
+# Overnight usage
+nohup kodo --goal-file feature.md --cycles 10 ./my-project > run.log 2>&1 &
+```
 
 > **⚠️ Heads up:** agents run with full permissions (`bypassPermissions` mode). They primarily work in your project directory but **can access any file on your system** (installing dependencies, editing configs, etc.). Make sure you have a git commit or backup before launching.
 

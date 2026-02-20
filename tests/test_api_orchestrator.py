@@ -6,12 +6,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from kodo import log
+from kodo.log import RunDir
 from kodo.orchestrators.api import ApiOrchestrator, _messages_to_text
 from tests.conftest import FakeRunResult
 
 
 def test_cycle_done_returns_finished(tmp_path: Path):
-    log.init(tmp_path, run_id="api_done")
+    log.init(RunDir.create(tmp_path, "api_done"))
 
     def fake_run_sync(prompt, *, usage_limits=None):
         # Find the done tool among the agent's tools and call it
@@ -42,7 +43,7 @@ def test_cycle_done_returns_finished(tmp_path: Path):
 
 
 def test_cycle_no_done_returns_summary(tmp_path: Path):
-    log.init(tmp_path, run_id="api_nodone")
+    log.init(RunDir.create(tmp_path, "api_nodone"))
 
     def fake_run_sync(prompt, *, usage_limits=None):
         return FakeRunResult(output="partial progress")
@@ -64,7 +65,7 @@ def test_cycle_no_done_returns_summary(tmp_path: Path):
 
 
 def test_usage_limit_exceeded(tmp_path: Path):
-    log.init(tmp_path, run_id="api_limit")
+    log.init(RunDir.create(tmp_path, "api_limit"))
     from pydantic_ai.exceptions import UsageLimitExceeded
 
     def fake_agent_init(self, model, *, system_prompt=None, tools=None, **kwargs):
@@ -83,7 +84,7 @@ def test_usage_limit_exceeded(tmp_path: Path):
 
 
 def test_529_fallback(tmp_path: Path):
-    log.init(tmp_path, run_id="api_529")
+    log.init(RunDir.create(tmp_path, "api_529"))
     from pydantic_ai.exceptions import ModelHTTPError
 
     call_count = [0]

@@ -7,13 +7,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 from kodo import log
+from kodo.log import RunDir
 from kodo.sessions.cursor import CursorSession
 from tests.mocks.cursor_process import MockCursorProcess
 
 
 def test_no_result_message_returns_empty_text(tmp_path: Path):
     """If cursor-agent produces output but no 'result' type message, text should be empty."""
-    log.init(tmp_path, run_id="no_result")
+    log.init(RunDir.create(tmp_path, "no_result"))
     session = CursorSession()
 
     def factory(cmd, **kwargs):
@@ -37,7 +38,7 @@ def test_no_result_message_returns_empty_text(tmp_path: Path):
 
 def test_empty_stdout_no_crash(tmp_path: Path):
     """If cursor-agent produces no output at all, should return empty result."""
-    log.init(tmp_path, run_id="empty_out")
+    log.init(RunDir.create(tmp_path, "empty_out"))
     session = CursorSession()
 
     def factory(cmd, **kwargs):
@@ -56,7 +57,7 @@ def test_empty_stdout_no_crash(tmp_path: Path):
 
 def test_chat_id_from_alternate_keys(tmp_path: Path):
     """cursor-agent might report chat_id or session_id instead of chatId."""
-    log.init(tmp_path, run_id="alt_keys")
+    log.init(RunDir.create(tmp_path, "alt_keys"))
 
     for key in ["chat_id", "session_id"]:
         session = CursorSession()
@@ -79,7 +80,7 @@ def test_chat_id_from_alternate_keys(tmp_path: Path):
 
 def test_system_prompt_resent_after_reset(tmp_path: Path):
     """After reset(), the system prompt should be prepended to the next query again."""
-    log.init(tmp_path, run_id="reset_sysprompt")
+    log.init(RunDir.create(tmp_path, "reset_sysprompt"))
     session = CursorSession(system_prompt="Be careful.")
 
     calls = []
@@ -100,7 +101,7 @@ def test_system_prompt_resent_after_reset(tmp_path: Path):
 
 def test_large_result_text_not_truncated(tmp_path: Path):
     """Session should pass through large result text without truncating."""
-    log.init(tmp_path, run_id="large_result")
+    log.init(RunDir.create(tmp_path, "large_result"))
     session = CursorSession()
     big_text = "x" * 100_000
 
@@ -115,7 +116,7 @@ def test_large_result_text_not_truncated(tmp_path: Path):
 
 def test_workspace_flag_matches_project_dir(tmp_path: Path):
     """The --workspace flag should be set to the project_dir."""
-    log.init(tmp_path, run_id="workspace")
+    log.init(RunDir.create(tmp_path, "workspace"))
     session = CursorSession()
     calls = []
 

@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from kodo import log
+from kodo.log import RunDir
 from kodo.sessions.cursor import CursorSession
 from tests.mocks.cursor_process import MockCursorProcess
 
@@ -20,7 +21,7 @@ def _make_popen_factory(**defaults):
 
 
 def test_query_returns_result(tmp_path: Path):
-    log.init(tmp_path, run_id="cursor_test")
+    log.init(RunDir.create(tmp_path, "cursor_test"))
     session = CursorSession(model="composer-1.5")
 
     with patch(
@@ -35,7 +36,7 @@ def test_query_returns_result(tmp_path: Path):
 
 
 def test_chat_id_captured_for_resume(tmp_path: Path):
-    log.init(tmp_path, run_id="cursor_resume")
+    log.init(RunDir.create(tmp_path, "cursor_resume"))
     session = CursorSession(model="composer-1.5")
 
     with patch(
@@ -60,7 +61,7 @@ def test_chat_id_captured_for_resume(tmp_path: Path):
 
 
 def test_system_prompt_prepended_once(tmp_path: Path):
-    log.init(tmp_path, run_id="cursor_sysprompt")
+    log.init(RunDir.create(tmp_path, "cursor_sysprompt"))
     session = CursorSession(model="composer-1.5", system_prompt="Be helpful.")
 
     calls = []
@@ -80,7 +81,7 @@ def test_system_prompt_prepended_once(tmp_path: Path):
 
 
 def test_error_on_nonzero_returncode(tmp_path: Path):
-    log.init(tmp_path, run_id="cursor_error")
+    log.init(RunDir.create(tmp_path, "cursor_error"))
     session = CursorSession(model="composer-1.5")
 
     with patch(
@@ -95,7 +96,7 @@ def test_error_on_nonzero_returncode(tmp_path: Path):
 
 
 def test_reset_clears_state(tmp_path: Path):
-    log.init(tmp_path, run_id="cursor_reset")
+    log.init(RunDir.create(tmp_path, "cursor_reset"))
     session = CursorSession(model="composer-1.5")
 
     with patch(

@@ -8,6 +8,7 @@ from types import ModuleType
 from unittest.mock import patch
 
 from kodo import log
+from kodo.log import RunDir
 from kodo.sessions.claude import ClaudeSession
 from tests.mocks.claude_sdk import (
     MockClaudeAgentOptions,
@@ -46,7 +47,7 @@ def _run_session(
     tmp_path, run_id, responses=None, client_factory=None, **session_kwargs
 ):
     """Helper: create session, run one query, clean up. Returns (session, result)."""
-    log.init(tmp_path, run_id=run_id)
+    log.init(RunDir.create(tmp_path, run_id))
     session_kwargs.setdefault("use_api_key", True)
     _, modules = _fake_modules(responses=responses, client_factory=client_factory)
 
@@ -107,7 +108,7 @@ def test_no_messages_from_receive_response(tmp_path: Path):
 
 def test_same_project_dir_reuses_client(tmp_path: Path):
     """Querying the same project_dir twice should not create a second client."""
-    log.init(tmp_path, run_id="reuse_client")
+    log.init(RunDir.create(tmp_path, "reuse_client"))
     client_count = [0]
 
     def counting_factory(options=None):
@@ -130,7 +131,7 @@ def test_same_project_dir_reuses_client(tmp_path: Path):
 
 def test_different_project_dir_creates_new_client(tmp_path: Path):
     """Querying a different project_dir should create a new client."""
-    log.init(tmp_path, run_id="diff_dir")
+    log.init(RunDir.create(tmp_path, "diff_dir"))
     client_count = [0]
     dir_a = tmp_path / "a"
     dir_b = tmp_path / "b"
@@ -157,7 +158,7 @@ def test_different_project_dir_creates_new_client(tmp_path: Path):
 
 def test_plan_mode_captured_in_result(tmp_path: Path):
     """When _can_use_tool denies ExitPlanMode, the plan should appear in the result text."""
-    log.init(tmp_path, run_id="plan_mode")
+    log.init(RunDir.create(tmp_path, "plan_mode"))
     resp = MockResultMessage(result="waiting for review", is_error=False)
     _, modules = _fake_modules(responses=[resp])
 
@@ -184,7 +185,7 @@ def test_plan_mode_captured_in_result(tmp_path: Path):
 
 def test_query_after_close_raises(tmp_path: Path):
     """After close(), attempting to query should fail (loop is stopped)."""
-    log.init(tmp_path, run_id="after_close")
+    log.init(RunDir.create(tmp_path, "after_close"))
     _, modules = _fake_modules()
 
     with patch.dict(sys.modules, modules):
