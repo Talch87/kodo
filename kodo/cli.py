@@ -992,7 +992,13 @@ examples:
         if len(goal_text) > 500:
             print("...")
         print("-" * 40)
-        use_existing = input("Use this goal? [Y/n] ").strip().lower()
+        
+        # In noninteractive mode or with --yes, assume user wants to use existing goal
+        if noninteractive or args.yes:
+            use_existing = "y"
+        else:
+            use_existing = input("Use this goal? [Y/n] ").strip().lower()
+        
         if use_existing in ("n", "no"):
             goal_text = get_goal()
 
@@ -1017,7 +1023,12 @@ examples:
                 if s.acceptance_criteria:
                     print(f"     Done when: {s.acceptance_criteria[:100]}")
             print("-" * 40)
-            use_plan = input("Use this goal plan? [Y/n] ").strip().lower()
+            # In noninteractive mode or with --yes, use existing plan
+            if noninteractive or args.yes:
+                use_plan = "y"
+            else:
+                use_plan = input("Use this goal plan? [Y/n] ").strip().lower()
+            
             if not use_plan or use_plan == "y":
                 plan = existing_plan
                 refined_path = project_dir / ".kodo" / "goal-refined.md"
@@ -1035,10 +1046,15 @@ examples:
                     if len(refined) > 500:
                         print("...")
                     print("-" * 40)
-                    use_refined = input("Use this refined goal? [Y/n] ").strip().lower()
+                    # In noninteractive mode or with --yes, use refined goal
+                    if noninteractive or args.yes:
+                        use_refined = "y"
+                    else:
+                        use_refined = input("Use this refined goal? [Y/n] ").strip().lower()
+                    
                     if not use_refined or use_refined == "y":
                         goal_text = refined
-                    elif has_claude():
+                    elif has_claude() and not (noninteractive or args.yes):
                         redo = input("Re-run intake interview? [y/N] ").strip().lower()
                         if redo == "y":
                             goal_text = run_intake(project_dir, goal_text)
