@@ -56,6 +56,7 @@ def _build_tools(
     goal: str,
     verification_state: VerificationState | None = None,
     browser_testing: bool = False,
+    verifiers: dict | None = None,
 ) -> list[Tool]:
     """Build pydantic-ai Tool objects for each team agent + the done tool."""
     tools: list[Tool] = []
@@ -148,6 +149,7 @@ def _build_tools(
             project_dir,
             state=verification_state,
             browser_testing=browser_testing,
+            verifiers=verifiers,
         )
         if rejection:
             log.emit("orchestrator_done_rejected", rejection=rejection[:5000])
@@ -218,6 +220,7 @@ class ApiOrchestrator(OrchestratorBase):
         max_exchanges: int = 30,
         prior_summary: str = "",
         browser_testing: bool = False,
+        verifiers: dict | None = None,
     ) -> CycleResult:
         done_signal = DoneSignal()
         verification_state = VerificationState()
@@ -229,6 +232,7 @@ class ApiOrchestrator(OrchestratorBase):
             goal,
             verification_state,
             browser_testing=browser_testing,
+            verifiers=verifiers,
         )
         result = CycleResult()
 

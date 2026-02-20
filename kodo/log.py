@@ -232,6 +232,7 @@ def _bucket_label(b: str) -> str:
         "claude_subscription": "Claude",
         "codex_subscription": "Codex",
         "cursor_subscription": "Cursor",
+        "gemini_api": "Gemini",
     }.get(b, b)
 
 
@@ -404,7 +405,7 @@ def parse_run(log_file: Path) -> RunState | None:
             agent_name = evt["agent"]
             if agent_name:
                 for key in list(agent_session_ids.keys()):
-                    if key in ("claude", "codex", "cursor"):
+                    if key in ("claude", "codex", "cursor", "gemini-cli"):
                         agent_session_ids[agent_name] = agent_session_ids.pop(key)
 
     if run_start is None or cli_args is None:

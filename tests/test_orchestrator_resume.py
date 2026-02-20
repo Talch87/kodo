@@ -32,6 +32,8 @@ class FakeOrchestrator(OrchestratorBase):
         *,
         max_exchanges: int = 30,
         prior_summary: str = "",
+        browser_testing: bool = False,
+        verifiers: dict | None = None,
     ) -> CycleResult:
         self._cycle_calls.append(
             {

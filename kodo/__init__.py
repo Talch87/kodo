@@ -1,6 +1,6 @@
 """kodo — autonomous goal-driven coding agent."""
 
-__version__ = "0.4.12"
+__version__ = "0.4.13"
 
 from kodo import log
 from kodo.agent import Agent, AgentResult
@@ -37,8 +37,11 @@ TESTER_BROWSER_PROMPT = (
 )
 
 ARCHITECT_PROMPT = (
-    "You are a code reviewer. Read the codebase, identify bugs and structural issues "
-    "with specific file/line references.\n" + _VERIFIER_SUFFIX
+    "You are the architect. When reviewing code, update .kodo/architecture.md with "
+    "key decisions, component boundaries, and lessons learned. Keep it concise.\n"
+    "Workers read this file before coding and may append critique there.\n"
+    "Identify bugs and structural issues with specific file/line references.\n"
+    + _VERIFIER_SUFFIX
 )
 
 
@@ -61,7 +64,10 @@ def make_session(
     from kodo.sessions.claude import ClaudeSession
     from kodo.sessions.codex import CodexSession
     from kodo.sessions.cursor import CursorSession
+    from kodo.sessions.gemini_cli import GeminiCliSession
 
+    if backend == "gemini-cli":
+        return GeminiCliSession(model=model, system_prompt=system_prompt)
     if backend == "codex":
         return CodexSession(model=model, system_prompt=system_prompt)
     if backend == "cursor":

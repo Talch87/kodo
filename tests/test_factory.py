@@ -19,5 +19,3 @@ def test_build_orchestrator_api():
         orch = build_orchestrator("api", model="opus")
     assert type(orch).__name__ == "ApiOrchestrator"
     assert orch.model == "claude-opus-4-6"
-
-

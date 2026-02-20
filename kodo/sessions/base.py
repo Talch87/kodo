@@ -18,6 +18,9 @@ class QueryResult:
     output_tokens: int | None = None
     usage_raw: dict | None = field(default=None, repr=False)
 
+    def __post_init__(self) -> None:
+        self.text = self.text.strip()
+
 
 @dataclass
 class SessionStats:

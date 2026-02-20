@@ -8,6 +8,7 @@
   <a href="https://docs.anthropic.com/en/docs/claude-code"><img src="https://img.shields.io/badge/Claude_Code-Max-blueviolet?logo=anthropic&logoColor=white" alt="Claude Code"></a>
   <a href="https://cursor.com"><img src="https://img.shields.io/badge/Cursor-supported-orange?logo=cursor&logoColor=white" alt="Cursor"></a>
   <a href="https://github.com/openai/codex"><img src="https://img.shields.io/badge/Codex-supported-green?logo=openai&logoColor=white" alt="OpenAI Codex"></a>
+  <a href="https://github.com/google-gemini/gemini-cli"><img src="https://img.shields.io/badge/Gemini_CLI-supported-blue?logo=google&logoColor=white" alt="Gemini CLI"></a>
 </p>
 
 ---
@@ -104,8 +105,9 @@ You need **at least one** agent backend installed:
 | 🤖 [Claude Code](docs/providers.md#claude-code-smart-workers--architect) | Smart workers + architect | `npm install -g @anthropic-ai/claude-code` |
 | ⚡ [Cursor](docs/providers.md#cursor-fast-workers--testers) | Fast workers + testers | Comes with Cursor; enable `cursor-agent` in settings |
 | 🟢 [OpenAI Codex](docs/providers.md#openai-codex-fast-workers) | Fast workers (alternative to Cursor) | `npm install -g @openai/codex` |
+| 💎 [Gemini CLI](docs/providers.md#gemini-cli-fast-workers) | Fast workers (free tier available) | `npm install -g @google/gemini-cli` |
 
-Claude Code + one fast backend (Cursor or Codex) is recommended. See [docs/providers.md](docs/providers.md) for detailed setup instructions, authentication, and troubleshooting.
+Claude Code + one fast backend (Cursor, Codex, or Gemini CLI) is recommended. See [docs/providers.md](docs/providers.md) for detailed setup instructions, authentication, and troubleshooting.
 
 For the **API orchestrator**, set a key in `.env` or your environment:
 ```bash
@@ -154,7 +156,14 @@ kodo --goal 'Build X' \
      --orchestrator-model gemini-flash \  # opus, sonnet, gemini-pro, gemini-flash
      --budget 5.00 \                      # per-step USD limit (default: none)
      --skip-intake \                      # skip AI goal refinement
+     --yes \                              # skip confirmation prompts
      ./my-project
+
+# Structured JSON output (for CI, scripts, or other agents calling kodo)
+kodo --goal 'Build X' --json ./my-project
+# Outputs: {"status": "completed", "finished": true, "cycles": 3, "exchanges": 15, ...}
+# Exit codes: 0 = success, 1 = error, 2 = partial (ran but didn't finish)
+# --json implies --yes and redirects progress output to stderr
 
 # Overnight usage
 nohup kodo --goal-file feature.md --cycles 10 ./my-project > run.log 2>&1 &
@@ -169,7 +178,7 @@ nohup kodo --goal-file feature.md --cycles 10 ./my-project > run.log 2>&1 &
  │
  ├── 🔍 architect        Survey codebase, review code, find bugs
  ├── 🧠 worker_smart     Complex implementation (Claude Code)
- ├── ⚡ worker_fast       Quick tasks, iterations (Cursor or Codex)
+ ├── ⚡ worker_fast       Quick tasks, iterations (Cursor, Codex, or Gemini CLI)
  ├── 🧪 tester           Run tests, verify behavior
  └── 🌐 tester_browser   Browser-based UI testing
 ```
@@ -183,6 +192,7 @@ kodo/
     claude.py                ClaudeSession (claude-agent-sdk, persistent)
     codex.py                 CodexSession (codex CLI, persistent)
     cursor.py                CursorSession (cursor-agent CLI, persistent)
+    gemini_cli.py            GeminiCliSession (gemini CLI, persistent)
   orchestrators/
     base.py                  Orchestrator protocol, CycleResult, RunResult
     api.py                   ApiOrchestrator (Pydantic AI — Anthropic, Gemini)
@@ -193,13 +203,60 @@ kodo/
 
 **Key concepts:**
 
-- **Session** — a stateful conversation with a backend (Claude, Cursor, or Codex). Tracks token usage, supports reset.
+- **Session** — a stateful conversation with a backend (Claude, Cursor, Codex, or Gemini CLI). Tracks token usage, supports reset.
 - **Agent** — a prompt + session + turn budget. Call `agent.run(task, project_dir)` to get work done.
 - **Orchestrator** — an LLM that delegates to a team of agents via tool calls:
   - `ClaudeCodeOrchestrator` — runs on Claude Code with agents as MCP tools. Free on Max subscription.
   - `ApiOrchestrator` — runs on Anthropic/Gemini API. Pay-per-token orchestrator, but workers still use your subscription.
 - **Cycle** — one unit of orchestrated work. Think of it as one dev session.
 - **Run** — multiple cycles until done, with summaries bridging context between cycles.
+
+## 🎨 Custom teams
+
+You can customize which agents run by dropping a `team.json` file — no code changes needed.
+
+**Lookup order:**
+1. `{project}/.kodo/team.json` — project-level override
+2. `~/.kodo/teams/{mode}.json` — user-level named team
+
+**Example:** adding a UX/UI designer agent to review user-facing code:
+
+```json
+{
+  "name": "saga-with-designer",
+  "agents": {
+    "worker_fast": {
+      "backend": "claude", "model": "sonnet",
+      "description": "Fast worker for implementation tasks."
+    },
+    "worker_smart": {
+      "backend": "claude", "model": "opus",
+      "description": "Deep-thinking worker for complex tasks."
+    },
+    "tester": {
+      "backend": "claude", "model": "sonnet",
+      "description": "Runs tests and reports results.",
+      "max_turns": 10
+    },
+    "architect": {
+      "backend": "claude", "model": "opus",
+      "description": "Reviews architecture, validates direction.",
+      "max_turns": 10, "timeout_s": 600
+    },
+    "designer": {
+      "backend": "claude", "model": "opus",
+      "description": "UX/UI advisor. Reviews component structure, accessibility, interaction patterns. Provides file/line references.",
+      "system_prompt": "You are a UX/UI design advisor. Review code for UI structure, accessibility, responsive design, and consistency. Reference specific files and lines. Fix minor issues yourself. Say 'ALL CHECKS PASS' if clean.",
+      "max_turns": 10, "timeout_s": 600,
+      "fallback_model": "sonnet"
+    }
+  }
+}
+```
+
+The orchestrator sees all agents in the team and delegates to them as needed. You can add any specialized reviewer (security auditor, performance analyst, etc.) the same way.
+
+**Agent fields:** `backend` and `model` are required. Optional: `description`, `system_prompt`, `max_turns` (default 15), `timeout_s`, `chrome` (for browser agents), `fallback_model`.
 
 ## 💰 Cost tracking
 

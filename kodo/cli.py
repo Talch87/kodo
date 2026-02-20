@@ -25,6 +25,7 @@ from kodo.factory import (
 )
 from kodo.log import RunDir
 from kodo.orchestrators.base import GoalPlan, GoalStage, ResumeState
+from kodo.team_config import load_team_config, build_team_from_json
 
 
 def _print_banner() -> None:
@@ -482,8 +483,9 @@ def launch_run(
     goal_text: str,
     params: dict,
     plan: GoalPlan | None = None,
-) -> None:
-    """Build team + orchestrator and run."""
+    json_mode: bool = False,
+):
+    """Build team + orchestrator and run. Returns the RunResult."""
     # Snapshot config and goal into the run directory
     run_dir.config_file.write_text(json.dumps(params, indent=2))
     if not run_dir.goal_file.exists():
@@ -495,52 +497,73 @@ def launch_run(
     project_dir = run_dir.project_dir
 
     mode = get_mode(params["mode"])
-    team = mode.build_team(params["budget_per_step"])
+    verifiers = None
+
+    # Try loading a team JSON config; fall back to hardcoded mode
+    team_config = load_team_config(params["mode"], project_dir)
+    if team_config:
+        team = build_team_from_json(team_config, params["budget_per_step"])
+        system_prompt = team_config.get("orchestrator_prompt") or mode.system_prompt
+        verifiers = team_config.get("verifiers")
+        max_exchanges = team_config.get("max_exchanges", params["max_exchanges"])
+        max_cycles = team_config.get("max_cycles", params["max_cycles"])
+    else:
+        team = mode.build_team(params["budget_per_step"])
+        system_prompt = mode.system_prompt
+        max_exchanges = params["max_exchanges"]
+        max_cycles = params["max_cycles"]
+
     orchestrator = build_orchestrator(
         params["orchestrator"],
         params["orchestrator_model"],
-        system_prompt=mode.system_prompt,
+        system_prompt=system_prompt,
     )
 
-    print(f"\nMode: {mode.name} — {mode.description}")
-    print(f"Orchestrator: {params['orchestrator']} ({orchestrator.model})")
-    print(f"Team: {', '.join(team.keys())}")
-    print(f"Project dir: {project_dir}")
-    print(
-        f"Max: {params['max_exchanges']} exchanges/cycle, {params['max_cycles']} cycles"
-    )
-    if plan:
-        print(f"Stages: {len(plan.stages)}")
-    print(f"Log: {log_path}")
-    print()
+    if not json_mode:
+        print(f"\nMode: {mode.name} — {mode.description}")
+        if team_config:
+            team_name = team_config.get("name", "custom")
+            print(f"Team config: {team_name}")
+        print(f"Orchestrator: {params['orchestrator']} ({orchestrator.model})")
+        print(f"Team: {', '.join(team.keys())}")
+        print(f"Project dir: {project_dir}")
+        print(f"Max: {max_exchanges} exchanges/cycle, {max_cycles} cycles")
+        if plan:
+            print(f"Stages: {len(plan.stages)}")
+        print(f"Log: {log_path}")
+        print()
 
     result = orchestrator.run(
         goal_text,
         project_dir,
         team,
-        max_exchanges=params["max_exchanges"],
-        max_cycles=params["max_cycles"],
+        max_exchanges=max_exchanges,
+        max_cycles=max_cycles,
         plan=plan,
+        verifiers=verifiers,
     )
 
-    print(f"\n{'=' * 50}")
-    if result.stage_results:
-        completed = sum(1 for sr in result.stage_results if sr.finished)
-        print(
-            f"Done: {completed}/{len(result.stage_results)} stage(s) completed, "
-            f"{len(result.cycles)} cycle(s), {result.total_exchanges} exchanges, "
-            f"${result.total_cost_usd:.4f}"
-        )
-    else:
-        print(
-            f"Done: {len(result.cycles)} cycle(s), {result.total_exchanges} exchanges, ${result.total_cost_usd:.4f}"
-        )
-    if result.summary:
-        print(f"  {result.summary[:300]}")
+    if not json_mode:
+        print(f"\n{'=' * 50}")
+        if result.stage_results:
+            completed = sum(1 for sr in result.stage_results if sr.finished)
+            print(
+                f"Done: {completed}/{len(result.stage_results)} stage(s) completed, "
+                f"{len(result.cycles)} cycle(s), {result.total_exchanges} exchanges, "
+                f"${result.total_cost_usd:.4f}"
+            )
+        else:
+            print(
+                f"Done: {len(result.cycles)} cycle(s), {result.total_exchanges} exchanges, ${result.total_cost_usd:.4f}"
+            )
+        if result.summary:
+            print(f"  {result.summary[:300]}")
+
+    return result
 
 
-def launch_resume(run_dir: RunDir, state: log.RunState) -> None:
-    """Resume an interrupted run from its parsed RunState."""
+def launch_resume(run_dir: RunDir, state: log.RunState):
+    """Resume an interrupted run from its parsed RunState. Returns the RunResult."""
     log.init_append(state.log_file)
 
     project_dir = run_dir.project_dir
@@ -556,11 +579,21 @@ def launch_resume(run_dir: RunDir, state: log.RunState) -> None:
     }
 
     mode = get_mode(params["mode"])
-    team = mode.build_team(params["budget_per_step"])
+    verifiers = None
+
+    team_config = load_team_config(params["mode"], project_dir)
+    if team_config:
+        team = build_team_from_json(team_config, params["budget_per_step"])
+        system_prompt = team_config.get("orchestrator_prompt") or mode.system_prompt
+        verifiers = team_config.get("verifiers")
+    else:
+        team = mode.build_team(params["budget_per_step"])
+        system_prompt = mode.system_prompt
+
     orchestrator = build_orchestrator(
         params["orchestrator"],
         params["orchestrator_model"],
-        system_prompt=mode.system_prompt,
+        system_prompt=system_prompt,
     )
 
     resume = ResumeState(
@@ -600,6 +633,7 @@ def launch_resume(run_dir: RunDir, state: log.RunState) -> None:
         max_cycles=params["max_cycles"],
         resume=resume,
         plan=plan,
+        verifiers=verifiers,
     )
 
     total_cycles = state.completed_cycles + len(result.cycles)
@@ -611,6 +645,53 @@ def launch_resume(run_dir: RunDir, state: log.RunState) -> None:
     if result.summary:
         print(f"  {result.summary[:300]}")
 
+    return result
+
+
+# ---------------------------------------------------------------------------
+# JSON output helpers
+# ---------------------------------------------------------------------------
+
+EXIT_SUCCESS = 0
+EXIT_ERROR = 1
+EXIT_PARTIAL = 2
+
+
+def _format_json_output(result=None, error: str | None = None) -> dict:
+    """Build the structured JSON output dict."""
+    if error is not None:
+        return {"status": "error", "error": error}
+
+    if result.finished:
+        status = "completed"
+    elif result.cycles:
+        status = "partial"
+    else:
+        status = "failed"
+
+    output = {
+        "status": status,
+        "finished": result.finished,
+        "cycles": len(result.cycles),
+        "exchanges": result.total_exchanges,
+        "cost_usd": round(result.total_cost_usd, 4),
+        "summary": result.summary,
+    }
+
+    if result.stage_results:
+        output["stages"] = [
+            {
+                "index": sr.stage_index,
+                "name": sr.stage_name,
+                "finished": sr.finished,
+                "summary": sr.summary,
+                "cycles": len(sr.cycles),
+            }
+            for sr in result.stage_results
+        ]
+
+    return output
+
 
 # ---------------------------------------------------------------------------
 # Entry point
@@ -618,11 +699,22 @@ def launch_resume(run_dir: RunDir, state: log.RunState) -> None:
 
 
 def main() -> None:
+    json_mode = "--json" in sys.argv
     try:
         _main_inner()
     except KeyboardInterrupt:
-        print("\nInterrupted.")
+        if json_mode:
+            print(json.dumps({"status": "error", "error": "Interrupted"}))
+        else:
+            print("\nInterrupted.")
         sys.exit(130)
+    except SystemExit:
+        raise
+    except Exception as exc:
+        if json_mode:
+            print(json.dumps({"status": "error", "error": str(exc)}))
+            sys.exit(EXIT_ERROR)
+        raise
 
 
 def _offer_intake(run_dir: RunDir, goal_text: str) -> GoalPlan | str | None:
@@ -756,27 +848,55 @@ def _main_inner() -> None:
     # Non-interactive goal input
     goal_group = parser.add_mutually_exclusive_group()
     goal_group.add_argument(
-        "--goal", type=str, default=None,
+        "--goal",
+        type=str,
+        default=None,
         help="Goal text (inline). Enables non-interactive mode.",
     )
     goal_group.add_argument(
-        "--goal-file", type=str, default=None,
+        "--goal-file",
+        type=str,
+        default=None,
         help="Path to a file containing the goal text. Enables non-interactive mode.",
     )
 
     # Non-interactive config flags
     parser.add_argument("--mode", type=str, default=None, choices=["saga", "mission"])
-    parser.add_argument("--exchanges", type=int, default=None,
-                        help="Max exchanges per cycle")
+    parser.add_argument(
+        "--exchanges", type=int, default=None, help="Max exchanges per cycle"
+    )
     parser.add_argument("--cycles", type=int, default=None, help="Max cycles")
-    parser.add_argument("--orchestrator", type=str, default=None,
-                        choices=["api", "claude-code"])
-    parser.add_argument("--orchestrator-model", type=str, default=None,
-                        choices=["opus", "sonnet", "gemini-pro", "gemini-flash"])
-    parser.add_argument("--budget", type=float, default=None,
-                        help="Budget per step in USD")
-    parser.add_argument("--skip-intake", action="store_true", default=False,
-                        help="Skip intake interview, use goal as-is")
+    parser.add_argument(
+        "--orchestrator", type=str, default=None, choices=["api", "claude-code"]
+    )
+    parser.add_argument(
+        "--orchestrator-model",
+        type=str,
+        default=None,
+        choices=["opus", "sonnet", "gemini-pro", "gemini-flash"],
+    )
+    parser.add_argument(
+        "--budget", type=float, default=None, help="Budget per step in USD"
+    )
+    parser.add_argument(
+        "--skip-intake",
+        action="store_true",
+        default=False,
+        help="Skip intake interview, use goal as-is",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        help="Output structured JSON to stdout. Implies --yes.",
+    )
+    parser.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        default=False,
+        help="Skip all confirmation prompts.",
+    )
 
     parser.add_argument(
         "project_dir",
@@ -786,18 +906,44 @@ def _main_inner() -> None:
     )
     args = parser.parse_args()
 
-    non_interactive = args.goal is not None or args.goal_file is not None
+    # --json implies --yes
+    if args.json:
+        args.yes = True
 
-    _print_banner()
+    non_interactive = args.goal is not None or args.goal_file is not None
+    skip_prompts = non_interactive or args.yes
+
+    # In JSON mode, redirect prints to stderr so stdout stays clean for JSON
+    original_stdout = None
+    if args.json:
+        import os
+
+        original_stdout = sys.stdout
+        sys.stdout = sys.stderr
+        os.environ["KODO_NO_VIEWER"] = "1"
+
+    if not args.json:
+        _print_banner()
 
     if non_interactive and args.resume is not None:
+        if args.json:
+            sys.stdout = original_stdout
+            print(
+                json.dumps(
+                    _format_json_output(
+                        error="--resume cannot be used with --goal/--goal-file"
+                    )
+                )
+            )
+            sys.exit(EXIT_ERROR)
         print("Error: --resume cannot be used with --goal/--goal-file")
         sys.exit(1)
 
     project_dir = Path(args.project_dir)
     project_dir.mkdir(parents=True, exist_ok=True)
     project_dir = project_dir.resolve()
-    print(f"  Project: {project_dir}")
+    if not args.json:
+        print(f"  Project: {project_dir}")
 
     # Handle --resume
     if args.resume is not None:
@@ -825,13 +971,19 @@ def _main_inner() -> None:
 
         print(f"  Goal: {state.goal[:80]}{'...' if len(state.goal) > 80 else ''}")
         print(f"  Cycles completed: {state.completed_cycles}/{state.max_cycles}")
-        confirm = input("\nResume this run? [Y/n] ").strip().lower()
-        if confirm in ("n", "no"):
-            print("Aborted.")
-            sys.exit(0)
+        if not skip_prompts:
+            confirm = input("\nResume this run? [Y/n] ").strip().lower()
+            if confirm in ("n", "no"):
+                print("Aborted.")
+                sys.exit(0)
 
         run_dir = RunDir.from_log_file(state.log_file, project_dir)
-        launch_resume(run_dir, state)
+        result = launch_resume(run_dir, state)
+
+        if args.json:
+            sys.stdout = original_stdout
+            print(json.dumps(_format_json_output(result), indent=2))
+            sys.exit(EXIT_SUCCESS if result.finished else EXIT_PARTIAL)
         return
 
     # 1. Get goal
@@ -841,11 +993,21 @@ def _main_inner() -> None:
         else:
             goal_path = Path(args.goal_file)
             if not goal_path.exists():
-                print(f"Error: goal file not found: {goal_path}")
+                msg = f"Goal file not found: {goal_path}"
+                if args.json:
+                    sys.stdout = original_stdout
+                    print(json.dumps(_format_json_output(error=msg)))
+                    sys.exit(EXIT_ERROR)
+                print(f"Error: {msg}")
                 sys.exit(1)
             goal_text = goal_path.read_text().strip()
             if not goal_text:
-                print("Error: goal file is empty.")
+                msg = "Goal file is empty."
+                if args.json:
+                    sys.stdout = original_stdout
+                    print(json.dumps(_format_json_output(error=msg)))
+                    sys.exit(EXIT_ERROR)
+                print(f"Error: {msg}")
                 sys.exit(1)
     else:
         goal_file = next(
@@ -915,9 +1077,7 @@ def _main_inner() -> None:
                     if len(refined) > 500:
                         print("...")
                     print("-" * 40)
-                    use_refined = (
-                        input("Use this refined goal? [Y/n] ").strip().lower()
-                    )
+                    use_refined = input("Use this refined goal? [Y/n] ").strip().lower()
                     if not use_refined or use_refined == "y":
                         goal_text = refined
                     else:
@@ -953,7 +1113,7 @@ def _main_inner() -> None:
         print(f"  Budget/step:  ${params['budget_per_step']:.2f}")
     print()
 
-    if not non_interactive:
+    if not skip_prompts:
         print("  WARNING: Agents run with full permissions (bypass mode).")
         print("  They will create, modify, and delete files — primarily in")
         print(f"  {project_dir}")
@@ -966,7 +1126,12 @@ def _main_inner() -> None:
             sys.exit(0)
 
     # 6. Launch
-    launch_run(run_dir, goal_text, params, plan=plan)
+    result = launch_run(run_dir, goal_text, params, plan=plan, json_mode=args.json)
+
+    if args.json:
+        sys.stdout = original_stdout
+        print(json.dumps(_format_json_output(result), indent=2))
+        sys.exit(EXIT_SUCCESS if result.finished else EXIT_PARTIAL)
 
 
 if __name__ == "__main__":

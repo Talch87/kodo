@@ -79,35 +79,29 @@ class RunResult:
         return self.cycles[-1].summary if self.cycles else ""
 
 
+# NOTE: If the orchestrator still over-specifies tasks despite this prompt,
+# the next step is to insert an LLM layer between the orchestrator and the
+# team that strips implementation details from directives, passing through
+# only the WHAT/WHY and letting agents decide HOW.
 ORCHESTRATOR_SYSTEM_PROMPT = """
-You are an orchestrator managing a team of AI agents working on a software project.
+You are an orchestrator. Your ONLY job is to get the user's desired outcome.
 
-Your strategy: leverage the AI workers to solve low level problems, you ensure 
-1) right direction: 
- - sound architecture, 
- - right libraries, 
- - right user experience being built.
-The insight behind is: worker AI can implement almost any well-formulated feature,
-but its risk is building the wrong thing. 
- 
-2) quality control and incremental improvements.
- - you build tools to control quality along the way. You try to boldly test things user will care about and experience.
- - you have strong unit test suite
- - you use git to commit only useful work, you can revert if some iteration just can't get to a good place.
- - Therefore you work in small iterations, putting small goals, verifying they are accomplished well w/o technical debt.
+Key insight: your agents have full codebase access and are expert coders.
+They are better than you at implementation decisions. Every detail you specify
+risks making the result worse. Specify WHAT the user wants, never HOW to build it.
 
-Insight: sometimes iterations of work are 
-not helpful - code comes out too complex, either because the task turns out to have contradictions /
-technical obstacles or just because worker AI lacked good architectural insight or was sloppy.
-You ensure each iteration moves the project forward: 
-more clarify, better core abstractions, more useful testing tools.
+Your role:
+1. Define the desired outcome clearly (user-facing behavior, not code structure).
+2. Break work into small, verifiable checkpoints.
+3. Delegate each checkpoint as a goal, not as instructions.
+4. Verify results match user intent. Commit good work, revert bad iterations.
 
-1. You study the goal and draft a final vision of where you want to get. 
-2. You break it down into checkpoints - the verifiable states your product will go through on the path to the final desired state.
-3. You break work towards closest checkpoint down into small incremental tasks. You control completion of incremental tasks. You commit them.
-4. You revisit your plan as you discover facts about the domain and technology and adapt.
+The team shares .kodo/architecture.md — the architect updates it during reviews,
+workers read it before coding and write critique there if they disagree.
+You don't relay architectural decisions; the file does that.
 
-When communicating with agents, give high level goals and let them figure out details.
+What you decide: priorities, scope, what "done" looks like, when to revert.
+What agents decide: code structure, libraries, patterns, file organization.
 """.strip()
 
 
@@ -212,12 +206,15 @@ def verify_done(
     *,
     state: VerificationState | None = None,
     browser_testing: bool = False,
+    verifiers: dict | None = None,
 ) -> str | None:
     """Run tester + architect to verify the goal is met.
 
     Returns None if all checks pass, or a rejection message with issues found.
-    *browser_testing*: when False, ``tester_browser`` is skipped even if present
-    in the team.
+    *browser_testing*: when False, browser testers are skipped even if configured.
+    *verifiers*: optional dict with ``testers``, ``browser_testers``, ``reviewers``
+    lists referencing agent keys in *team*.  When ``None``, falls back to legacy
+    hardcoded key lookups (``"tester"``, ``"tester_browser"``, ``"architect"``).
     """
     from kodo import log
 
@@ -235,12 +232,26 @@ def verify_done(
         f"# Orchestrator's summary\n{summary}\n\n"
     )
 
-    # Collect tester agents — include tester_browser only when requested
+    # Resolve which agents to use for each verifier role
+    if verifiers is not None:
+        tester_keys = verifiers.get("testers", [])
+        browser_tester_keys = verifiers.get("browser_testers", [])
+        reviewer_keys = verifiers.get("reviewers", [])
+    else:
+        # Legacy fallback — same behavior as before
+        tester_keys = ["tester"] if "tester" in team else []
+        browser_tester_keys = ["tester_browser"] if "tester_browser" in team else []
+        reviewer_keys = ["architect"] if "architect" in team else []
+
+    # Collect tester agents — include browser testers only when requested
     tester_agents: list[tuple[str, Agent]] = []
-    if team.get("tester"):
-        tester_agents.append(("tester", team["tester"]))
-    if team.get("tester_browser") and browser_testing:
-        tester_agents.append(("tester_browser", team["tester_browser"]))
+    for key in tester_keys:
+        if key in team:
+            tester_agents.append((key, team[key]))
+    if browser_testing:
+        for key in browser_tester_keys:
+            if key in team:
+                tester_agents.append((key, team[key]))
 
     for tester_name, tester_agent in tester_agents:
         try:
@@ -267,34 +278,43 @@ def verify_done(
             log.emit("done_verification_error", agent=tester_name, error=str(exc))
             issues.append(f"**{tester_name} crashed:** {exc}")
 
-    architect_agent = team.get("architect")
-    if architect_agent:
+    # Run reviewer agents
+    for reviewer_key in reviewer_keys:
+        reviewer_agent = team.get(reviewer_key)
+        if not reviewer_agent:
+            continue
         try:
-            log.tprint(f"[done] running architect verification (attempt {attempt})...")
-            architect_result = architect_agent.run(
+            log.tprint(
+                f"[done] running {reviewer_key} verification (attempt {attempt})..."
+            )
+            reviewer_result = reviewer_agent.run(
                 verification_prompt
                 + "Review the codebase for critical bugs, missing features, "
                 "or deviations from the goal. Report ONLY issues found. "
                 "If everything looks good, say 'ALL CHECKS PASS'.",
                 project_dir,
                 new_conversation=reset_session,
-                agent_name="architect_verification",
+                agent_name=f"{reviewer_key}_verification",
             )
-            architect_report = architect_result.text or ""
+            reviewer_report = reviewer_result.text or ""
             log.emit(
-                "done_verification", agent="architect", report=architect_report[:5000]
+                "done_verification", agent=reviewer_key, report=reviewer_report[:5000]
             )
-            if not _check_passed(architect_report):
-                issues.append(f"**Architect found issues:**\n{architect_report[:3000]}")
+            if not _check_passed(reviewer_report):
+                label = reviewer_key.replace("_", " ").title()
+                issues.append(f"**{label} found issues:**\n{reviewer_report[:3000]}")
         except Exception as exc:
-            log.emit("done_verification_error", agent="architect", error=str(exc))
-            issues.append(f"**Architect crashed:** {exc}")
+            log.emit("done_verification_error", agent=reviewer_key, error=str(exc))
+            label = reviewer_key.replace("_", " ").title()
+            issues.append(f"**{label} crashed:** {exc}")
 
     # Fallback: if no dedicated verifiers exist, use a worker in a fresh session
     has_dedicated_verifiers = (
         bool(tester_agents)
-        or team.get("tester_browser") is not None  # exists even if skipped
-        or architect_agent is not None
+        or bool(
+            browser_tester_keys
+        )  # exist even if skipped due to browser_testing=False
+        or bool(reviewer_keys)
     )
     if not has_dedicated_verifiers:
         # Prefer worker_smart, fall back to any worker
@@ -410,6 +430,7 @@ class Orchestrator(Protocol):
         max_exchanges: int = 30,
         prior_summary: str = "",
         browser_testing: bool = False,
+        verifiers: dict | None = None,
     ) -> CycleResult:
         """Run one cycle of orchestrated work."""
         ...
@@ -424,6 +445,7 @@ class Orchestrator(Protocol):
         max_cycles: int = 5,
         resume: ResumeState | None = None,
         plan: GoalPlan | None = None,
+        verifiers: dict | None = None,
     ) -> RunResult:
         """Run multiple cycles until done or limit reached."""
         ...
@@ -449,6 +471,7 @@ class OrchestratorBase:
         max_exchanges: int = 30,
         prior_summary: str = "",
         browser_testing: bool = False,
+        verifiers: dict | None = None,
     ) -> CycleResult:
         raise NotImplementedError
 
@@ -462,11 +485,13 @@ class OrchestratorBase:
         max_cycles: int = 5,
         resume: ResumeState | None = None,
         plan: GoalPlan | None = None,
+        verifiers: dict | None = None,
     ) -> RunResult:
         from kodo import log
         from kodo.sessions.claude import ClaudeSession
         from kodo.sessions.codex import CodexSession
         from kodo.sessions.cursor import CursorSession
+        from kodo.sessions.gemini_cli import GeminiCliSession
 
         # Inject resume session IDs into agents before starting
         if resume:
@@ -481,6 +506,8 @@ class OrchestratorBase:
                     sess._chat_id = sid
                 elif isinstance(sess, CodexSession):
                     sess._session_id = sid
+                elif isinstance(sess, GeminiCliSession):
+                    sess._resume_next = True
 
         start_cycle = (resume.completed_cycles if resume else 0) + 1
         prior_summary = resume.prior_summary if resume else ""
@@ -512,6 +539,7 @@ class OrchestratorBase:
                     max_exchanges=max_exchanges,
                     max_cycles=max_cycles,
                     resume=resume,
+                    verifiers=verifiers,
                 )
             else:
                 self._run_single(
@@ -523,6 +551,7 @@ class OrchestratorBase:
                     max_cycles=max_cycles,
                     start_cycle=start_cycle,
                     prior_summary=prior_summary,
+                    verifiers=verifiers,
                 )
         finally:
             self._summarizer.shutdown()
@@ -563,6 +592,7 @@ class OrchestratorBase:
         max_cycles: int,
         start_cycle: int,
         prior_summary: str,
+        verifiers: dict | None = None,
     ) -> None:
         """Original single-goal execution loop."""
         from kodo import log
@@ -583,6 +613,7 @@ class OrchestratorBase:
                 team,
                 max_exchanges=max_exchanges,
                 prior_summary=prior_summary,
+                verifiers=verifiers,
             )
             result.cycles.append(cycle_result)
 
@@ -602,6 +633,7 @@ class OrchestratorBase:
         max_exchanges: int,
         max_cycles: int,
         resume: ResumeState | None = None,
+        verifiers: dict | None = None,
     ) -> None:
         """Staged execution: iterate over plan stages with a shared cycle budget."""
         from kodo import log
@@ -668,6 +700,7 @@ class OrchestratorBase:
                     max_exchanges=max_exchanges,
                     prior_summary=prior_summary,
                     browser_testing=stage.browser_testing,
+                    verifiers=verifiers,
                 )
                 cycle_result.stage_index = stage.index
                 result.cycles.append(cycle_result)

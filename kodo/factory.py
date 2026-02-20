@@ -32,6 +32,7 @@ def available_backends() -> dict[str, bool]:
         "claude": shutil.which("claude") is not None,
         "codex": shutil.which("codex") is not None,
         "cursor": shutil.which("cursor-agent") is not None,
+        "gemini-cli": shutil.which("gemini") is not None,
     }
 
 
@@ -45,6 +46,10 @@ def has_codex() -> bool:
 
 def has_cursor() -> bool:
     return available_backends()["cursor"]
+
+
+def has_gemini_cli() -> bool:
+    return available_backends()["gemini-cli"]
 
 
 def check_api_key(orchestrator: str, model: str) -> str | None:
@@ -93,12 +98,10 @@ class Mode:
 # ---------------------------------------------------------------------------
 
 _WORKER_COMMON = (
-    "It can read and navigate existing codebases, run tests, and execute git commands "
-    "on your behalf (commit, revert, branch, etc.).\n"
-    "Give it a SHORT directive (2-5 sentences) describing the desired behavior, "
-    "not the implementation — it is a skilled coder.\n"
-    "If it seems stuck or unproductive, set new_conversation=true and give "
-    "a clear, fresh directive. Don't repeat a failing directive more than twice.\n"
+    "It has full codebase access, can run tests, and execute git commands.\n"
+    "Give it a SHORT directive (1-3 sentences) describing desired BEHAVIOR, "
+    "not implementation. It reads .kodo/architecture.md for architectural context.\n"
+    "If it seems stuck, set new_conversation=true with a fresh directive.\n"
     "If the result contains [Context was reset: ...], give enough context in your "
     "next directive for the worker to continue effectively."
 )
@@ -118,12 +121,21 @@ _WORKER_SMART_DESC = (
 )
 
 # Extra instructions only relevant in saga mode (with tester/architect)
-_WORKER_FAST_SAGA_EXTRA = "\nEach task should be ONE feature or change that can be built and tested independently."
+_ARCH_FILE_NOTE = (
+    "\nRead .kodo/architecture.md before starting. If the architecture is wrong or "
+    "unworkable, write your critique to the same file instead of silently deviating."
+)
+
+_WORKER_FAST_SAGA_EXTRA = (
+    "\nEach task should be ONE feature or change that can be built and tested independently."
+    + _ARCH_FILE_NOTE
+)
 
 _WORKER_SMART_SAGA_EXTRA = (
     "\nEach task should be ONE feature or change that can be built and tested independently.\n"
     "If the result contains [PROPOSED PLAN], review it. If good, tell the worker: "
     '"Plan approved, proceed with implementation." If you want changes, describe them.'
+    + _ARCH_FILE_NOTE
 )
 
 
@@ -142,11 +154,12 @@ def _build_team_saga(
     """Create the saga team, skipping workers whose backends are unavailable."""
     _has_cursor = has_cursor()
     _has_codex = has_codex()
+    _has_gemini_cli = has_gemini_cli()
     _has_claude = has_claude()
-    if not _has_cursor and not _has_codex and not _has_claude:
+    if not _has_cursor and not _has_codex and not _has_gemini_cli and not _has_claude:
         raise RuntimeError(
             "No worker backends available. Install at least one of: "
-            "claude (Claude Code CLI), cursor-agent (Cursor CLI), or codex (OpenAI Codex CLI)."
+            "claude, cursor-agent, codex, or gemini."
         )
 
     team: TeamConfig = {}
@@ -202,6 +215,15 @@ def _build_team_saga(
             timeout_s=worker_timeout_s,
         )
 
+    if _has_gemini_cli and "worker_fast" not in team:
+        worker_fast_session = make_session("gemini-cli", "gemini-2.5-flash", budget)
+        team["worker_fast"] = Agent(
+            worker_fast_session,
+            _WORKER_FAST_DESC + _WORKER_FAST_SAGA_EXTRA,
+            max_turns=30,
+            timeout_s=worker_timeout_s,
+        )
+
     if _has_claude:
         worker_smart_session = make_session(
             "claude", "opus", None, fallback_model="sonnet"
@@ -222,11 +244,10 @@ def _build_team_saga(
         )
         team["architect"] = Agent(
             architect_session,
-            "A code reviewer that reads the codebase and identifies bugs and structural issues.\n"
-            "Use this to survey an existing codebase before planning work, to get a second "
-            "opinion before calling done, or when you suspect architectural problems.\n"
-            "It provides a brief actionable critique with specific file/line references. "
-            "It does not make changes.",
+            "Code reviewer. Identifies bugs and structural issues with specific "
+            "file/line references. Updates .kodo/architecture.md with decisions during reviews.\n"
+            "Workers read that file; you don't need to relay its decisions. "
+            "It does not implement features.",
             max_turns=10,
             timeout_s=architect_timeout_s,
         )
@@ -238,11 +259,12 @@ def _build_team_mission(budget: float | None = None) -> TeamConfig:
     """Create a mission team, skipping workers whose backends are unavailable."""
     _has_cursor = has_cursor()
     _has_codex = has_codex()
+    _has_gemini_cli = has_gemini_cli()
     _has_claude = has_claude()
-    if not _has_cursor and not _has_codex and not _has_claude:
+    if not _has_cursor and not _has_codex and not _has_gemini_cli and not _has_claude:
         raise RuntimeError(
             "No worker backends available. Install at least one of: "
-            "claude (Claude Code CLI), cursor-agent (Cursor CLI), or codex (OpenAI Codex CLI)."
+            "claude, cursor-agent, codex, or gemini."
         )
 
     team: TeamConfig = {}
@@ -258,6 +280,15 @@ def _build_team_mission(budget: float | None = None) -> TeamConfig:
 
     if _has_codex and "worker_fast" not in team:
         worker_fast_session = make_session("codex", "o4-mini", budget)
+        team["worker_fast"] = Agent(
+            worker_fast_session,
+            _WORKER_FAST_DESC,
+            max_turns=30,
+            timeout_s=1800,
+        )
+
+    if _has_gemini_cli and "worker_fast" not in team:
+        worker_fast_session = make_session("gemini-cli", "gemini-2.5-flash", budget)
         team["worker_fast"] = Agent(
             worker_fast_session,
             _WORKER_FAST_DESC,
@@ -289,7 +320,7 @@ def _build_team_mission(budget: float | None = None) -> TeamConfig:
 
 def _mission_system_prompt() -> str:
     """Build the mission system prompt based on available backends."""
-    _has_fast = has_cursor() or has_codex()
+    _has_fast = has_cursor() or has_codex() or has_gemini_cli()
     _has_claude = has_claude()
 
     if _has_fast and _has_claude:
@@ -306,22 +337,16 @@ def _mission_system_prompt() -> str:
         )
 
     return f"""\
-You are an orchestrator guiding AI workers to solve one focused issue
-in an existing codebase. {workers_desc}
+You are an orchestrator solving one focused issue. {workers_desc}
 
-Your job:
-1. Give a worker a clear, focused directive based on the goal.
-2. If the worker gets stuck or goes in the wrong direction — unblock it:
-   clarify intent, suggest an approach, or narrow the scope.
-3. When the worker says it's done, critically review:
-   - Does it actually solve the stated goal?
-   - Is the code clean and correct?
-   - Did anything break?
-4. If quality isn't there, send the worker back with specific feedback.
-5. Call done only when the issue is genuinely solved.
+Your workers have full codebase access and are expert coders. Tell them
+WHAT outcome you want, not HOW to implement it. Over-specifying makes
+results worse — the worker sees the code, you don't.
 
-Keep directives short (2-5 sentences). Don't micromanage implementation.
-The workers are skilled coders — focus on WHAT and WHY, not HOW."""
+Your job: define the desired outcome, delegate, verify the result solves
+the goal, send back with specific feedback if not. Call done when solved.
+
+Keep directives to 1-3 sentences describing desired behavior."""
 
 
 # ---------------------------------------------------------------------------
@@ -336,6 +361,8 @@ def _describe_backends() -> str:
         parts.append("Cursor")
     if has_codex():
         parts.append("Codex")
+    if has_gemini_cli():
+        parts.append("Gemini CLI")
     if has_claude():
         parts.append("Claude Code")
     return " + ".join(parts) if parts else "none"
@@ -343,7 +370,7 @@ def _describe_backends() -> str:
 
 def _saga_description() -> str:
     agents = []
-    if has_cursor() or has_codex():
+    if has_cursor() or has_codex() or has_gemini_cli():
         agents.append("fast worker")
     if has_claude():
         agents.append("smart worker")
@@ -357,7 +384,7 @@ def _saga_description() -> str:
 
 def _mission_description() -> str:
     workers = []
-    if has_cursor() or has_codex():
+    if has_cursor() or has_codex() or has_gemini_cli():
         workers.append("fast")
     if has_claude():
         workers.append("smart")
