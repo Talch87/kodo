@@ -4,6 +4,8 @@ import argparse
 import json
 import re
 import sys
+import threading
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -85,6 +87,39 @@ Guidelines for staging:
 # ---------------------------------------------------------------------------
 
 
+class _Spinner:
+    """Simple elapsed-time spinner for long-running operations."""
+
+    FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+    def __init__(self, message: str = "Thinking"):
+        self._message = message
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def __enter__(self):
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._stop.set()
+        if self._thread:
+            self._thread.join()
+        # Clear the spinner line
+        print(f"\r{' ' * 60}\r", end="", flush=True)
+
+    def _run(self):
+        start = time.monotonic()
+        i = 0
+        while not self._stop.wait(0.1):
+            elapsed = int(time.monotonic() - start)
+            frame = self.FRAMES[i % len(self.FRAMES)]
+            print(f"\r  {frame} {self._message}... {elapsed}s", end="", flush=True)
+            i += 1
+
+
 def get_goal() -> str:
     """Prompt user for a multiline goal. Empty line finishes input."""
     print("\nWhat's your goal? (Enter an empty line to finish)")
@@ -129,18 +164,16 @@ def run_intake_chat(
 
     output_file = selfo_dir / ("goal-plan.json" if staged else "goal-refined.md")
 
-    print("\n--- Intake interview (type /done or empty line to finish) ---\n")
+    print("\n--- Intake interview (type /done or empty line to finish) ---")
 
-    # First message
+    # First message — agent explores the project and asks clarifying questions
     initial = f"Here's my project goal:\n\n{goal_text}"
-    result = session.query(initial, project_dir, max_turns=10)
+    with _Spinner("Reviewing project"):
+        result = session.query(initial, project_dir, max_turns=10)
     print(f"\n{result.text}\n")
 
-    # Check if output was already written on first turn
-    if output_file.exists():
-        return _read_intake_output(output_file, staged)
-
-    # Conversation loop
+    # Conversation loop — always wait for user input, even if the agent
+    # eagerly wrote the output file (it may still be asking questions)
     while True:
         try:
             user_input = input("You: ").strip()
@@ -151,7 +184,8 @@ def run_intake_chat(
         if not user_input or user_input == "/done":
             break
 
-        result = session.query(user_input, project_dir, max_turns=10)
+        with _Spinner("Thinking"):
+            result = session.query(user_input, project_dir, max_turns=10)
         print(f"\n{result.text}\n")
 
     # Check if output was written during the conversation
@@ -159,12 +193,12 @@ def run_intake_chat(
         return _read_intake_output(output_file, staged)
 
     # User ended the interview — ask Claude to finalize and write the output
-    print("\nFinalizing...")
     finalize_msg = (
         "The user has ended the interview. Based on everything discussed, "
         "please write the output file now."
     )
-    result = session.query(finalize_msg, project_dir, max_turns=10)
+    with _Spinner("Finalizing"):
+        result = session.query(finalize_msg, project_dir, max_turns=10)
     print(f"\n{result.text}\n")
 
     if output_file.exists():
@@ -248,10 +282,21 @@ def _load_goal_plan(project_dir: Path) -> GoalPlan | None:
     return plan if plan.stages else None
 
 
+def _labeled_choices(
+    options: list[str], default_index: int
+) -> list[questionary.Choice]:
+    """Build Choice objects, appending '(default)' to the default item's label."""
+    choices = []
+    for i, opt in enumerate(options):
+        label = f"{opt} (default)" if i == default_index else opt
+        choices.append(questionary.Choice(title=label, value=opt))
+    return choices
+
+
 def _select_one(title: str, options: list[str], default_index: int = 0) -> str:
     """Arrow-key single selection. Returns the chosen string."""
-    default = options[default_index] if default_index < len(options) else None
-    result = questionary.select(title, choices=options, default=default).ask()
+    choices = _labeled_choices(options, default_index)
+    result = questionary.select(title, choices=choices).ask()
     if result is None:
         print("Cancelled.")
         sys.exit(1)
@@ -262,9 +307,9 @@ def _select_numeric(
     title: str, presets: list[str], default_index: int = 0, type_fn: type = int
 ) -> str:
     """Arrow-key selection with a 'Custom...' option for numeric values."""
-    choices = presets + ["Custom..."]
-    default = choices[default_index] if default_index < len(choices) else None
-    result = questionary.select(title, choices=choices, default=default).ask()
+    all_options = presets + ["Custom..."]
+    choices = _labeled_choices(all_options, default_index)
+    result = questionary.select(title, choices=choices).ask()
     if result is None:
         print("Cancelled.")
         sys.exit(1)
