@@ -1,0 +1,186 @@
+"""OpenAI Codex session using codex CLI subprocess."""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import threading
+import time
+from pathlib import Path
+
+from kodo import log
+from kodo.sessions.base import QueryResult, SessionStats
+
+
+class CodexSession:
+    def __init__(
+        self,
+        model: str = "o4-mini",
+        system_prompt: str | None = None,
+        resume_session_id: str | None = None,
+        sandbox: str = "workspace-write",
+    ):
+        self.model = model
+        self.system_prompt = system_prompt
+        self._stats = SessionStats()
+        self._session_id: str | None = resume_session_id
+        self._system_prompt_sent = False
+        self._sandbox = sandbox
+
+    @property
+    def stats(self) -> SessionStats:
+        return self._stats
+
+    @property
+    def cost_bucket(self) -> str:
+        return "codex_subscription"
+
+    @property
+    def session_id(self) -> str | None:
+        return self._session_id
+
+    def reset(self) -> None:
+        log.emit(
+            "session_reset",
+            session="codex",
+            model=self.model,
+            session_id=self._session_id,
+            queries_before=self._stats.queries,
+        )
+        self._session_id = None
+        self._stats = SessionStats()
+        self._system_prompt_sent = False
+
+    def query(self, prompt: str, project_dir: Path, *, max_turns: int) -> QueryResult:
+        # Codex has no native system prompt — prepend to first query per session
+        if self.system_prompt and not self._system_prompt_sent:
+            prompt = f"{self.system_prompt}\n\n{prompt}"
+            self._system_prompt_sent = True
+
+        if self._session_id:
+            # Resume an existing session
+            cmd = [
+                "codex",
+                "exec",
+                "resume",
+                self._session_id,
+                "--full-auto",
+                "--json",
+                "--cd",
+                str(project_dir),
+            ]
+        else:
+            cmd = [
+                "codex",
+                "exec",
+                prompt,
+                "--full-auto",
+                "--json",
+                "--cd",
+                str(project_dir),
+                "--sandbox",
+                self._sandbox,
+                "-m",
+                self.model,
+            ]
+
+        log.emit(
+            "session_query_start",
+            session="codex",
+            model=self.model,
+            prompt=prompt,
+            session_id=self._session_id,
+            project_dir=str(project_dir),
+        )
+
+        t0 = time.monotonic()
+        result_text = ""
+        input_tokens = 0
+        output_tokens = 0
+        raw_messages: list[dict] = []
+
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        )
+
+        # Drain stderr in a background thread to avoid deadlock when the
+        # OS pipe buffer fills up while we're reading stdout.
+        stderr_chunks: list[str] = []
+
+        def _drain_stderr():
+            for line in proc.stderr:
+                stderr_chunks.append(line)
+
+        stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+        stderr_thread.start()
+
+        for line in proc.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                msg = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            raw_messages.append(msg)
+            event_type = msg.get("type", "")
+
+            # Capture session/thread ID
+            if event_type == "thread.started":
+                tid = msg.get("thread_id") or msg.get("session_id")
+                if tid:
+                    self._session_id = tid
+
+            # Accumulate token usage from completed turns
+            elif event_type == "turn.completed":
+                usage = msg.get("usage", {})
+                input_tokens += usage.get("input_tokens", 0)
+                output_tokens += usage.get("output_tokens", 0)
+
+            # Capture assistant message text
+            elif event_type == "item.completed":
+                item = msg.get("item", {})
+                if item.get("role") == "assistant":
+                    for content in item.get("content", []):
+                        if content.get("type") == "text":
+                            result_text = content.get("text", "")
+
+            # Capture errors
+            elif event_type == "error":
+                error_msg = msg.get("message", msg.get("error", ""))
+                if error_msg:
+                    result_text = error_msg
+
+        proc.wait()
+        stderr_thread.join(timeout=5)
+        elapsed = time.monotonic() - t0
+
+        is_error = proc.returncode != 0
+        stderr_text = "".join(stderr_chunks) if is_error else ""
+
+        self._stats.queries += 1
+        self._stats.total_input_tokens += input_tokens
+        self._stats.total_output_tokens += output_tokens
+
+        log.emit(
+            "session_query_end",
+            session="codex",
+            model=self.model,
+            elapsed_s=elapsed,
+            is_error=is_error,
+            session_id=self._session_id,
+            returncode=proc.returncode,
+            response_text=result_text or stderr_text,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            raw_messages=raw_messages,
+        )
+
+        return QueryResult(
+            text=result_text or stderr_text,
+            elapsed_s=elapsed,
+            is_error=is_error,
+            input_tokens=input_tokens or None,
+            output_tokens=output_tokens or None,
+        )
