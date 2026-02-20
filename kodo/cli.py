@@ -154,10 +154,19 @@ def run_intake_chat(
         result = session.query(user_input, project_dir, max_turns=10)
         print(f"\n{result.text}\n")
 
-        if output_file.exists():
-            return _read_intake_output(output_file, staged)
+    # Check if output was written during the conversation
+    if output_file.exists():
+        return _read_intake_output(output_file, staged)
 
-    # Check one last time
+    # User ended the interview — ask Claude to finalize and write the output
+    print("\nFinalizing...")
+    finalize_msg = (
+        "The user has ended the interview. Based on everything discussed, "
+        "please write the output file now."
+    )
+    result = session.query(finalize_msg, project_dir, max_turns=10)
+    print(f"\n{result.text}\n")
+
     if output_file.exists():
         return _read_intake_output(output_file, staged)
 
@@ -629,7 +638,7 @@ def _main_inner() -> None:
         print(f"  Goal: {state.goal[:80]}{'...' if len(state.goal) > 80 else ''}")
         print(f"  Cycles completed: {state.completed_cycles}/{state.max_cycles}")
         confirm = input("\nResume this run? [Y/n] ").strip().lower()
-        if confirm and confirm != "y":
+        if confirm in ("n", "no"):
             print("Aborted.")
             sys.exit(0)
 
@@ -650,7 +659,7 @@ def _main_inner() -> None:
             print("...")
         print("-" * 40)
         use_existing = input("Use this goal? [Y/n] ").strip().lower()
-        if use_existing and use_existing != "y":
+        if use_existing in ("n", "no"):
             goal_text = get_goal()
     else:
         goal_text = get_goal()
@@ -733,7 +742,7 @@ def _main_inner() -> None:
     print()
 
     confirm = input("Proceed? [Y/n] ").strip().lower()
-    if confirm and confirm != "y":
+    if confirm in ("n", "no"):
         print("Aborted.")
         sys.exit(0)
 
