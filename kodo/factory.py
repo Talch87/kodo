@@ -14,6 +14,7 @@ from kodo import (
     TESTER_PROMPT,
     TESTER_BROWSER_PROMPT,
     ARCHITECT_PROMPT,
+    DESIGNER_PROMPT,
     make_session,
 )
 from kodo.agent import Agent
@@ -133,6 +134,7 @@ def _build_team_saga(
     worker_timeout_s: float | None = 1800,
     tester_timeout_s: float | None = 1800,
     architect_timeout_s: float | None = 600,
+    designer_timeout_s: float | None = 600,
 ) -> TeamConfig:
     """Create the saga team, skipping workers whose backends are unavailable."""
     _has_cursor = has_cursor()
@@ -214,6 +216,26 @@ def _build_team_saga(
             "It does not make changes.",
             max_turns=10,
             timeout_s=architect_timeout_s,
+        )
+
+        designer_session = make_session(
+            "claude",
+            "opus",
+            None,
+            system_prompt=DESIGNER_PROMPT,
+            fallback_model="sonnet",
+        )
+        team["designer"] = Agent(
+            designer_session,
+            "A UX/UI design advisor that reviews code for user experience quality.\n"
+            "Use this when building or modifying user-facing features — web UIs, CLIs, "
+            "forms, navigation, or any user interaction surface.\n"
+            "Ask it to review component structure, interaction patterns, accessibility, "
+            "responsive design, and consistency with the project's design conventions.\n"
+            "It provides specific, actionable feedback with file/line references. "
+            "It does not make changes.",
+            max_turns=10,
+            timeout_s=designer_timeout_s,
         )
 
     return team
@@ -325,6 +347,7 @@ def _saga_description() -> str:
         agents.append("browser tester")
     if has_claude():
         agents.append("architect")
+        agents.append("designer")
     return f"Full team ({_describe_backends()}): {', '.join(agents)}"
 
 

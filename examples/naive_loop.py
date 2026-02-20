@@ -3,8 +3,12 @@
 This was the original approach before the orchestrated mode.
 Kept as a simple example of using Agent + Session directly.
 
-Usage:
+Usage (Unix):
   .venv/bin/python examples/naive_loop.py goal-td-game.md /tmp/td-test \
+    --backend claude --model sonnet --steps 5 --iters 2
+
+Usage (Windows):
+  .venv\\Scripts\\python examples\\naive_loop.py goal-td-game.md %TEMP%\\td-test ^
     --backend claude --model sonnet --steps 5 --iters 2
 """
 
@@ -75,7 +79,7 @@ def main() -> None:
     if args.model is None:
         args.model = "sonnet" if args.backend == "claude" else "composer-1.5"
 
-    goal_text = Path(args.goal).read_text()
+    goal_text = Path(args.goal).read_text(encoding="utf-8")
     project_dir = Path(args.project_dir)
     project_dir.mkdir(parents=True, exist_ok=True)
     project_dir = project_dir.resolve()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -86,7 +87,7 @@ Your strategy: leverage the AI workers to solve low level problems, you ensure
 1) right direction: 
  - sound architecture, 
  - right libraries, 
- - right user experience being built.
+ - right user experience being built. When modifying user-facing features, consult the designer agent early to validate UX patterns.
 The insight behind is: worker AI can implement almost any well-formulated feature,
 but its risk is building the wrong thing. 
  
@@ -544,7 +545,7 @@ class OrchestratorBase:
 
             # Open the HTML log viewer for easy inspection
             log_file = log.get_log_file()
-            if log_file and log_file.exists():
+            if log_file and log_file.exists() and not os.environ.get("KODO_NO_VIEWER"):
                 from kodo.viewer import open_viewer
 
                 open_viewer(log_file)
