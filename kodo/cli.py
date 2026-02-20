@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import re
 import sys
 import threading
@@ -656,6 +657,28 @@ EXIT_SUCCESS = 0
 EXIT_ERROR = 1
 EXIT_PARTIAL = 2
 
+# Will be set to the real stdout when --json redirects sys.stdout to stderr
+_original_stdout = None
+
+
+def _fail(msg: str, code: int = 1) -> None:
+    """Print error and exit. In JSON mode, outputs JSON to original stdout."""
+    if _original_stdout is not None:
+        sys.stdout = _original_stdout
+        print(json.dumps(_format_json_output(error=msg)))
+        sys.exit(EXIT_ERROR)
+    print(f"Error: {msg}")
+    sys.exit(code)
+
+
+def _emit_json_and_exit(args, result) -> None:
+    """If --json, emit result JSON to stdout and exit. Otherwise no-op."""
+    if not args.json:
+        return
+    sys.stdout = _original_stdout
+    print(json.dumps(_format_json_output(result), indent=2))
+    sys.exit(EXIT_SUCCESS if result.finished else EXIT_PARTIAL)
+
 
 def _format_json_output(result=None, error: str | None = None) -> dict:
     """Build the structured JSON output dict."""
@@ -914,11 +937,10 @@ def _main_inner() -> None:
     skip_prompts = non_interactive or args.yes
 
     # In JSON mode, redirect prints to stderr so stdout stays clean for JSON
-    original_stdout = None
+    global _original_stdout
+    _original_stdout = None
     if args.json:
-        import os
-
-        original_stdout = sys.stdout
+        _original_stdout = sys.stdout
         sys.stdout = sys.stderr
         os.environ["KODO_NO_VIEWER"] = "1"
 
@@ -926,18 +948,7 @@ def _main_inner() -> None:
         _print_banner()
 
     if non_interactive and args.resume is not None:
-        if args.json:
-            sys.stdout = original_stdout
-            print(
-                json.dumps(
-                    _format_json_output(
-                        error="--resume cannot be used with --goal/--goal-file"
-                    )
-                )
-            )
-            sys.exit(EXIT_ERROR)
-        print("Error: --resume cannot be used with --goal/--goal-file")
-        sys.exit(1)
+        _fail("--resume cannot be used with --goal/--goal-file")
 
     project_dir = Path(args.project_dir)
     project_dir.mkdir(parents=True, exist_ok=True)
@@ -950,8 +961,7 @@ def _main_inner() -> None:
         if args.resume == "__latest__":
             runs = log.find_incomplete_runs(project_dir)
             if not runs:
-                print("No incomplete runs found.")
-                sys.exit(1)
+                _fail("No incomplete runs found.")
             state = runs[0]
         else:
             # Check new layout first, then legacy
@@ -962,12 +972,10 @@ def _main_inner() -> None:
             elif legacy_log.exists():
                 log_file = legacy_log
             else:
-                print(f"Run not found: {args.resume}")
-                sys.exit(1)
+                _fail(f"Run not found: {args.resume}")
             state = log.parse_run(log_file)
             if state is None:
-                print(f"Could not parse run from {log_file}")
-                sys.exit(1)
+                _fail(f"Could not parse run from {log_file}")
 
         print(f"  Goal: {state.goal[:80]}{'...' if len(state.goal) > 80 else ''}")
         print(f"  Cycles completed: {state.completed_cycles}/{state.max_cycles}")
@@ -979,11 +987,7 @@ def _main_inner() -> None:
 
         run_dir = RunDir.from_log_file(state.log_file, project_dir)
         result = launch_resume(run_dir, state)
-
-        if args.json:
-            sys.stdout = original_stdout
-            print(json.dumps(_format_json_output(result), indent=2))
-            sys.exit(EXIT_SUCCESS if result.finished else EXIT_PARTIAL)
+        _emit_json_and_exit(args, result)
         return
 
     # 1. Get goal
@@ -993,22 +997,10 @@ def _main_inner() -> None:
         else:
             goal_path = Path(args.goal_file)
             if not goal_path.exists():
-                msg = f"Goal file not found: {goal_path}"
-                if args.json:
-                    sys.stdout = original_stdout
-                    print(json.dumps(_format_json_output(error=msg)))
-                    sys.exit(EXIT_ERROR)
-                print(f"Error: {msg}")
-                sys.exit(1)
+                _fail(f"Goal file not found: {goal_path}")
             goal_text = goal_path.read_text().strip()
             if not goal_text:
-                msg = "Goal file is empty."
-                if args.json:
-                    sys.stdout = original_stdout
-                    print(json.dumps(_format_json_output(error=msg)))
-                    sys.exit(EXIT_ERROR)
-                print(f"Error: {msg}")
-                sys.exit(1)
+                _fail("Goal file is empty.")
     else:
         goal_file = next(
             (p for p in project_dir.iterdir() if p.name.lower() == "goal.md"), None
@@ -1094,24 +1086,25 @@ def _main_inner() -> None:
                     goal_text = intake_result
 
     # 5. Summary and confirm
-    mode = get_mode(params["mode"])
-    print("\n" + "=" * 60)
-    print("  READY TO LAUNCH")
-    print("=" * 60)
-    print(f"  Project:      {project_dir}")
-    print(f"  Goal:         {goal_text[:80]}{'...' if len(goal_text) > 80 else ''}")
-    if plan:
-        print(f"  Stages:       {len(plan.stages)}")
-        for s in plan.stages:
-            print(f"                  {s.index}. {s.name}")
-    print(f"  Mode:         {mode.name} — {mode.description}")
-    print(f"  Orchestrator: {params['orchestrator']} ({params['orchestrator_model']})")
-    print(
-        f"  Exchanges:    {params['max_exchanges']}/cycle, {params['max_cycles']} cycles"
-    )
-    if params["budget_per_step"]:
-        print(f"  Budget/step:  ${params['budget_per_step']:.2f}")
-    print()
+    if not args.json:
+        mode = get_mode(params["mode"])
+        print("\n" + "=" * 60)
+        print("  READY TO LAUNCH")
+        print("=" * 60)
+        print(f"  Project:      {project_dir}")
+        print(f"  Goal:         {goal_text[:80]}{'...' if len(goal_text) > 80 else ''}")
+        if plan:
+            print(f"  Stages:       {len(plan.stages)}")
+            for s in plan.stages:
+                print(f"                  {s.index}. {s.name}")
+        print(f"  Mode:         {mode.name} — {mode.description}")
+        print(f"  Orchestrator: {params['orchestrator']} ({params['orchestrator_model']})")
+        print(
+            f"  Exchanges:    {params['max_exchanges']}/cycle, {params['max_cycles']} cycles"
+        )
+        if params["budget_per_step"]:
+            print(f"  Budget/step:  ${params['budget_per_step']:.2f}")
+        print()
 
     if not skip_prompts:
         print("  WARNING: Agents run with full permissions (bypass mode).")
@@ -1127,11 +1120,7 @@ def _main_inner() -> None:
 
     # 6. Launch
     result = launch_run(run_dir, goal_text, params, plan=plan, json_mode=args.json)
-
-    if args.json:
-        sys.stdout = original_stdout
-        print(json.dumps(_format_json_output(result), indent=2))
-        sys.exit(EXIT_SUCCESS if result.finished else EXIT_PARTIAL)
+    _emit_json_and_exit(args, result)
 
 
 if __name__ == "__main__":
