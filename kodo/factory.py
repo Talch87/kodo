@@ -15,6 +15,7 @@ from kodo import (
     TESTER_BROWSER_PROMPT,
     ARCHITECT_PROMPT,
     DESIGNER_PROMPT,
+    DESIGNER_BROWSER_PROMPT,
     make_session,
 )
 from kodo.agent import Agent
@@ -238,6 +239,27 @@ def _build_team_saga(
             timeout_s=designer_timeout_s,
         )
 
+        designer_browser_session = make_session(
+            "claude",
+            "opus",
+            None,
+            system_prompt=DESIGNER_BROWSER_PROMPT,
+            chrome=True,
+            fallback_model="sonnet",
+        )
+        team["designer_browser"] = Agent(
+            designer_browser_session,
+            "A UX/UI designer with browser access for web applications.\n"
+            "Use this when you need visual inspection and interactive testing of web UIs. "
+            "It opens the app in a real browser, takes screenshots, tests interactions, "
+            "and can modify CSS/components to improve visual design and UX.\n"
+            "Ask it to review and improve specific aspects (spacing, colors, responsive "
+            "behavior, accessibility, interaction patterns) and it will apply fixes directly.\n"
+            "It reports the changes made and verifies improvements with screenshots.",
+            max_turns=15,
+            timeout_s=designer_timeout_s,
+        )
+
     return team
 
 
@@ -348,6 +370,7 @@ def _saga_description() -> str:
     if has_claude():
         agents.append("architect")
         agents.append("designer")
+        agents.append("designer_browser")
     return f"Full team ({_describe_backends()}): {', '.join(agents)}"
 
 
