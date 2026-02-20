@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 from dataclasses import dataclass
 from pathlib import Path
 
-from kodo.sessions.base import QueryResult, Session, SessionCheckpoint
+from kodo.sessions.base import QueryResult, RetryStrategy, Session, SessionCheckpoint
 from kodo import log
 
 
@@ -59,12 +59,14 @@ class Agent:
         max_turns: int = 15,
         timeout_s: float | None = None,
         checkpoint_enabled: bool = True,
+        retry_strategy: RetryStrategy | None = None,
     ):
         self.session = session
         self.description = description  # kept for tool description extraction
         self.max_turns = max_turns
         self.timeout_s = timeout_s
         self.checkpoint_enabled = checkpoint_enabled
+        self.retry_strategy = retry_strategy or RetryStrategy()
         self.last_checkpoint: SessionCheckpoint | None = None
 
     def run(
@@ -97,14 +99,18 @@ class Agent:
 
         log.emit("agent_query", agent=label, prompt=goal)
 
+        def _do_query():
+            """Wrapper that applies retry strategy to session.query."""
+            return self.retry_strategy.execute(
+                self.session.query,
+                goal,
+                project_dir,
+                max_turns=self.max_turns,
+            )
+
         if self.timeout_s is not None:
             with ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(
-                    self.session.query,
-                    goal,
-                    project_dir,
-                    max_turns=self.max_turns,
-                )
+                future = pool.submit(_do_query)
                 try:
                     query_result = future.result(timeout=self.timeout_s)
                 except FuturesTimeoutError:
@@ -117,9 +123,7 @@ class Agent:
                         is_error=True,
                     )
         else:
-            query_result = self.session.query(
-                goal, project_dir, max_turns=self.max_turns
-            )
+            query_result = _do_query()
 
         bucket = self.session.cost_bucket
         log.emit(

@@ -139,3 +139,100 @@ class Session(Protocol):
     ) -> QueryResult: ...
 
     def reset(self) -> None: ...
+
+
+# ---------------------------------------------------------------------------
+# Retry strategy for transient failures (429 rate limits, 529 overloads)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RetryStrategy:
+    """Exponential backoff configuration for transient API failures.
+
+    When a session query raises a retryable error (HTTP 429, 529, or
+    transient network issues), the strategy will retry up to
+    ``max_retries`` times with exponential backoff starting at
+    ``initial_delay_s`` and capped at ``max_delay_s``.
+
+    Usage::
+
+        strategy = RetryStrategy()
+        result = strategy.execute(session.query, prompt, project_dir, max_turns=10)
+    """
+
+    max_retries: int = 5
+    initial_delay_s: float = 1.0
+    backoff_multiplier: float = 2.0
+    max_delay_s: float = 32.0
+    retryable_substrings: tuple[str, ...] = (
+        "429",
+        "rate limit",
+        "rate_limit",
+        "too many requests",
+        "overloaded",
+        "529",
+        "capacity",
+    )
+
+    def is_retryable(self, error: Exception) -> bool:
+        """Return True if the error looks like a transient rate-limit."""
+        error_str = str(error).lower()
+
+        # Check for known retryable status codes in the error
+        for substr in self.retryable_substrings:
+            if substr in error_str:
+                return True
+
+        # Check for status_code attribute (e.g. ModelHTTPError)
+        status = getattr(error, "status_code", None)
+        if status in (429, 529, 503):
+            return True
+
+        return False
+
+    def compute_delay(self, attempt: int) -> float:
+        """Compute backoff delay for the given attempt (0-indexed)."""
+        delay = self.initial_delay_s * (self.backoff_multiplier ** attempt)
+        return min(delay, self.max_delay_s)
+
+    def execute(
+        self,
+        fn,
+        *args,
+        **kwargs,
+    ) -> "QueryResult":
+        """Call *fn* with retries on transient errors.
+
+        Parameters
+        ----------
+        fn : callable
+            Typically ``session.query``.
+        *args, **kwargs :
+            Forwarded to *fn*.
+
+        Returns
+        -------
+        QueryResult
+            The result of the first successful call.
+
+        Raises
+        ------
+        Exception
+            The last error if all retries are exhausted.
+        """
+        last_error: Exception | None = None
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                return fn(*args, **kwargs)
+            except Exception as exc:
+                if not self.is_retryable(exc) or attempt >= self.max_retries:
+                    raise
+                last_error = exc
+                delay = self.compute_delay(attempt)
+                time.sleep(delay)
+
+        # Should never reach here, but satisfy type checker
+        assert last_error is not None
+        raise last_error
