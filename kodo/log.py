@@ -197,9 +197,9 @@ def tprint(msg: str) -> None:
     """Print with elapsed time prefix, e.g. '[  12.3s] ...'."""
     if _start_time is not None:
         elapsed = time.monotonic() - _start_time
-        print(f"  [{elapsed:7.1f}s] {msg}")
+        print(f"  [{elapsed:7.1f}s] {msg}", flush=True)
     else:
-        print(f"  {msg}")
+        print(f"  {msg}", flush=True)
 
 
 def _fmt_time(s: float) -> str:

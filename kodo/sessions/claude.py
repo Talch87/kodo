@@ -48,10 +48,12 @@ class ClaudeSession:
         self._session_id: str | None = None
         self._stats = SessionStats()
         # Plan-mode review state: when a worker calls ExitPlanMode, we capture
-        # the plan and interrupt so the orchestrator can review it.  On the
-        # *next* query (which carries orchestrator feedback) we auto-approve.
+        # the plan and interrupt so the orchestrator can review it.
+        # _plan_approved is set only when the follow-up prompt signals approval
+        # (contains "plan approved" or similar).  This ensures that asking for
+        # revisions doesn't accidentally auto-approve the next ExitPlanMode.
         self._pending_plan: str | None = None
-        self._plan_reviewed: bool = False
+        self._plan_approved: bool = False
         # Dedicated thread+loop so we never conflict with a caller's event loop
         self._loop = asyncio.new_event_loop()
         self._thread = threading.Thread(target=self._loop.run_forever, daemon=True)
@@ -65,18 +67,20 @@ class ClaudeSession:
     ) -> Any:
         """Handle tool permission requests.
 
-        For ExitPlanMode: deny the first call (so the orchestrator can review
-        the plan), then approve on the follow-up query after review.
-        All other tools are auto-approved.
+        For ExitPlanMode we always capture the plan and deny the *first*
+        call per query so the orchestrator can review it.  The flag
+        ``_plan_approved`` is set only when the orchestrator's next prompt
+        explicitly approves (see ``query()``).  This avoids auto-approving
+        a revised plan when the orchestrator asked for changes.
         """
         from claude_agent_sdk.types import PermissionResultAllow, PermissionResultDeny
 
         if tool_name == "ExitPlanMode":
-            if self._plan_reviewed:
-                # Orchestrator already reviewed — let the worker proceed.
-                self._plan_reviewed = False
+            if self._plan_approved:
+                # Orchestrator approved — let the worker proceed.
+                self._plan_approved = False
                 return PermissionResultAllow()
-            # First attempt: capture plan, interrupt so orchestrator can review.
+            # Capture plan text and interrupt so orchestrator can review.
             self._pending_plan = tool_input.get("plan", tool_input.get("content", ""))
             return PermissionResultDeny(
                 message=(
@@ -185,11 +189,22 @@ class ClaudeSession:
 
         self._ensure_client(project_dir)
 
-        # If a plan was captured in the previous query, the orchestrator has
-        # now had a chance to review it (this new query carries its feedback).
-        # Allow the next ExitPlanMode call to succeed.
+        # If a plan was captured in the previous query, check whether the
+        # orchestrator is approving it or asking for revisions.  Only approve
+        # ExitPlanMode when the prompt contains an approval signal; otherwise
+        # the next ExitPlanMode will be captured again for another review.
         if self._pending_plan is not None:
-            self._plan_reviewed = True
+            _APPROVAL_SIGNALS = [
+                "plan approved",
+                "proceed with",
+                "go ahead",
+                "i pick",
+                "i choose",
+                "implement",
+                "let's go with",
+            ]
+            prompt_lower = prompt.lower()
+            self._plan_approved = any(s in prompt_lower for s in _APPROVAL_SIGNALS)
             self._pending_plan = None
 
         log.emit(

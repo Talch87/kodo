@@ -54,6 +54,14 @@ def _fake_launch_partial(run_dir, goal_text, params, plan=None, json_mode=False)
 
 
 class TestJsonOutput:
+    @pytest.fixture(autouse=True)
+    def _fake_backends(self):
+        with (
+            patch("kodo.cli.has_claude", return_value=True),
+            patch("kodo.cli.check_api_key", return_value=None),
+        ):
+            yield
+
     def test_json_flag_accepted(self, project):
         """The --json flag should be recognized by argparse."""
         with (
@@ -162,15 +170,21 @@ class TestJsonOutput:
 class TestLaunchRunReturnsResult:
     def test_returns_run_result(self, project):
         """launch_run should return the RunResult, not None."""
+        from tests.conftest import FakeSession
+        from kodo.agent import Agent
+
         run_dir = RunDir.create(project, "test")
 
         fake_result = RunResult(
             cycles=[CycleResult(exchanges=3, total_cost_usd=0.0, finished=True)],
         )
 
+        fake_team = {"worker": Agent(FakeSession(), "test worker")}
+
         with (
             patch("kodo.cli.build_orchestrator") as mock_orch,
             patch("kodo.cli.load_team_config", return_value=None),
+            patch("kodo.factory._build_team_saga", return_value=fake_team),
         ):
             mock_orch.return_value.run.return_value = fake_result
             mock_orch.return_value.model = "test"

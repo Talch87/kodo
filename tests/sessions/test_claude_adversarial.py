@@ -176,11 +176,45 @@ def test_plan_mode_captured_in_result(tmp_path: Path):
             session._loop.call_soon_threadsafe(session._loop.stop)
             session._thread.join(timeout=5)
 
-    # The pending plan was set before query, so _plan_reviewed should have been set True
-    # and _pending_plan cleared. The plan text won't appear in result because the
-    # code path clears _pending_plan at the start of query and sets _plan_reviewed.
+    # The pending plan was set before query.  The prompt "review my plan" doesn't
+    # contain an approval signal, so _plan_approved stays False (the orchestrator
+    # hasn't approved yet — it's just reviewing).  _pending_plan is cleared.
     # This tests that the plan review handshake doesn't crash.
-    assert session._plan_reviewed is True
+    assert session._plan_approved is False
+    assert session._pending_plan is None
+
+
+def test_plan_approval_requires_signal(tmp_path: Path):
+    """Plan is only approved when the prompt contains an approval signal."""
+    log.init(RunDir.create(tmp_path, "plan_approval"))
+    resp = MockResultMessage(result="ok", is_error=False)
+    _, modules = _fake_modules(responses=[resp, resp, resp])
+
+    with patch.dict(sys.modules, modules):
+        session = ClaudeSession(use_api_key=True)
+        try:
+            # Simulate captured plan
+            session._pending_plan = "Option A vs Option B"
+
+            # "try again" → no approval signal → _plan_approved stays False
+            session.query("I don't like these, try again", tmp_path, max_turns=5)
+            assert session._plan_approved is False
+
+            # Simulate another captured plan after revision
+            session._pending_plan = "Option C vs Option D"
+
+            # "proceed with option C" → approval signal → _plan_approved True
+            session.query("Proceed with option C", tmp_path, max_turns=5)
+            assert session._plan_approved is True
+
+            # Simulate plan captured, orchestrator says "I choose"
+            session._plan_approved = False
+            session._pending_plan = "Option E"
+            session.query("I choose option E, let's go", tmp_path, max_turns=5)
+            assert session._plan_approved is True
+        finally:
+            session._loop.call_soon_threadsafe(session._loop.stop)
+            session._thread.join(timeout=5)
 
 
 def test_query_after_close_raises(tmp_path: Path):

@@ -50,6 +50,14 @@ def _make_args(**overrides) -> Namespace:
 
 
 class TestBuildParamsFromFlags:
+    @pytest.fixture(autouse=True)
+    def _fake_backends(self):
+        with (
+            patch("kodo.cli.has_claude", return_value=True),
+            patch("kodo.cli.check_api_key", return_value=None),
+        ):
+            yield
+
     def test_defaults_to_saga_mode(self, project):
         args = _make_args()
         params = _build_params_from_flags(args, project)
@@ -122,6 +130,14 @@ class TestBuildParamsFromFlags:
 
 
 class TestNonInteractiveGoalInput:
+    @pytest.fixture(autouse=True)
+    def _fake_backends(self):
+        with (
+            patch("kodo.cli.has_claude", return_value=True),
+            patch("kodo.cli.check_api_key", return_value=None),
+        ):
+            yield
+
     def test_inline_goal(self, project):
         """--goal 'text' passes goal_text correctly through to launch."""
         with (
@@ -291,6 +307,14 @@ class TestRunIntakeNoninteractive:
 
 
 class TestNonInteractiveEndToEnd:
+    @pytest.fixture(autouse=True)
+    def _fake_backends(self):
+        with (
+            patch("kodo.cli.has_claude", return_value=True),
+            patch("kodo.cli.check_api_key", return_value=None),
+        ):
+            yield
+
     def test_no_interactive_prompts(self, project):
         """The full non-interactive flow must never call input() or questionary."""
         with (
