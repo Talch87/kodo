@@ -13,11 +13,13 @@ from kodo import log
 from kodo.log import RunDir
 from kodo.sessions.claude import ClaudeSession, _extract_tokens
 from tests.mocks.claude_sdk import (
+    MockAssistantMessage,
     MockClaudeAgentOptions,
     MockClaudeSDKClient,
     MockPermissionResultAllow,
     MockPermissionResultDeny,
     MockResultMessage,
+    MockTextBlock,
 )
 
 
@@ -29,10 +31,12 @@ def _install_mock_sdk(responses=None):
     fake_mod.ClaudeAgentOptions = MockClaudeAgentOptions
     fake_mod.ClaudeSDKClient = lambda options=None: mock_client
     fake_mod.ResultMessage = MockResultMessage
+    fake_mod.AssistantMessage = MockAssistantMessage
 
     fake_types = ModuleType("claude_agent_sdk.types")
     fake_types.PermissionResultAllow = MockPermissionResultAllow
     fake_types.PermissionResultDeny = MockPermissionResultDeny
+    fake_types.TextBlock = MockTextBlock
 
     return mock_client, {
         "claude_agent_sdk": fake_mod,
@@ -92,9 +96,11 @@ def test_stats_accumulate(tmp_path: Path):
     fake_mod.ClaudeAgentOptions = MockClaudeAgentOptions
     fake_mod.ClaudeSDKClient = make_client
     fake_mod.ResultMessage = MockResultMessage
+    fake_mod.AssistantMessage = MockAssistantMessage
     fake_types = ModuleType("claude_agent_sdk.types")
     fake_types.PermissionResultAllow = MockPermissionResultAllow
     fake_types.PermissionResultDeny = MockPermissionResultDeny
+    fake_types.TextBlock = MockTextBlock
 
     with patch.dict(
         sys.modules,
@@ -159,9 +165,11 @@ def test_api_key_stripped_by_default(tmp_path: Path, monkeypatch):
     fake_mod.ClaudeAgentOptions = TrackingOptions
     fake_mod.ClaudeSDKClient = lambda options=None: mock_client
     fake_mod.ResultMessage = MockResultMessage
+    fake_mod.AssistantMessage = MockAssistantMessage
     fake_types = ModuleType("claude_agent_sdk.types")
     fake_types.PermissionResultAllow = MockPermissionResultAllow
     fake_types.PermissionResultDeny = MockPermissionResultDeny
+    fake_types.TextBlock = MockTextBlock
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-secret")
 
@@ -200,9 +208,11 @@ def test_api_key_kept_when_explicit(tmp_path: Path, monkeypatch):
     fake_mod.ClaudeAgentOptions = TrackingOptions
     fake_mod.ClaudeSDKClient = lambda options=None: mock_client
     fake_mod.ResultMessage = MockResultMessage
+    fake_mod.AssistantMessage = MockAssistantMessage
     fake_types = ModuleType("claude_agent_sdk.types")
     fake_types.PermissionResultAllow = MockPermissionResultAllow
     fake_types.PermissionResultDeny = MockPermissionResultDeny
+    fake_types.TextBlock = MockTextBlock
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-secret")
 

@@ -11,11 +11,13 @@ from kodo import log
 from kodo.log import RunDir
 from kodo.sessions.claude import ClaudeSession
 from tests.mocks.claude_sdk import (
+    MockAssistantMessage,
     MockClaudeAgentOptions,
     MockClaudeSDKClient,
     MockPermissionResultAllow,
     MockPermissionResultDeny,
     MockResultMessage,
+    MockTextBlock,
 )
 
 
@@ -32,10 +34,12 @@ def _fake_modules(responses=None, client_factory=None):
     fake_mod.ClaudeAgentOptions = MockClaudeAgentOptions
     fake_mod.ClaudeSDKClient = client_factory_fn
     fake_mod.ResultMessage = MockResultMessage
+    fake_mod.AssistantMessage = MockAssistantMessage
 
     fake_types = ModuleType("claude_agent_sdk.types")
     fake_types.PermissionResultAllow = MockPermissionResultAllow
     fake_types.PermissionResultDeny = MockPermissionResultDeny
+    fake_types.TextBlock = MockTextBlock
 
     return mock_client, {
         "claude_agent_sdk": fake_mod,

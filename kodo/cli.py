@@ -157,6 +157,7 @@ def run_intake_chat(
     single + file written, or None if user bailed.
     """
     run_dir.root.mkdir(parents=True, exist_ok=True)
+    log.init(run_dir)
 
     goal_path = run_dir.goal_file
     goal_path.write_text(goal_text)
@@ -174,6 +175,7 @@ def run_intake_chat(
     initial = f"Here's my project goal:\n\n{goal_text}"
     with _Spinner("Reviewing project"):
         result = session.query(initial, project_dir, max_turns=10)
+    log.emit("intake_response", text=result.text, is_error=result.is_error, turns=result.turns)
     print(f"\n{result.text}\n")
 
     # Conversation loop — always wait for user input, even if the agent
@@ -190,6 +192,7 @@ def run_intake_chat(
 
         with _Spinner("Thinking"):
             result = session.query(user_input, project_dir, max_turns=10)
+        log.emit("intake_response", text=result.text, is_error=result.is_error, turns=result.turns)
         print(f"\n{result.text}\n")
 
     # Check if output was written during the conversation

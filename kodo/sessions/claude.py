@@ -185,7 +185,8 @@ class ClaudeSession:
         self._stats = SessionStats()
 
     def query(self, prompt: str, project_dir: Path, *, max_turns: int) -> QueryResult:
-        from claude_agent_sdk import ResultMessage
+        from claude_agent_sdk import AssistantMessage, ResultMessage
+        from claude_agent_sdk.types import TextBlock
 
         self._ensure_client(project_dir)
 
@@ -220,11 +221,18 @@ class ClaudeSession:
         self._run(self._client.query(prompt))
 
         result = QueryResult(text="", elapsed_s=0.0)
+        # Collect text from AssistantMessage blocks as fallback when
+        # ResultMessage.result is None (e.g. tool-use-heavy turns).
+        assistant_texts: list[str] = []
 
         async def _collect():
             nonlocal result
             async for message in self._client.receive_response():
-                if isinstance(message, ResultMessage):
+                if isinstance(message, AssistantMessage):
+                    for block in message.content:
+                        if isinstance(block, TextBlock):
+                            assistant_texts.append(block.text)
+                elif isinstance(message, ResultMessage):
                     inp, out = _extract_tokens(message.usage)
                     result = QueryResult(
                         text=message.result or "",
@@ -244,6 +252,19 @@ class ClaudeSession:
                     self._stats.total_cost_usd += message.total_cost_usd or 0.0
 
         self._run(_collect())
+
+        # If ResultMessage had no text, use collected AssistantMessage texts.
+        if not result.text and assistant_texts:
+            result = QueryResult(
+                text="\n\n".join(assistant_texts),
+                elapsed_s=result.elapsed_s,
+                turns=result.turns,
+                cost_usd=result.cost_usd,
+                is_error=result.is_error,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                usage_raw=result.usage_raw,
+            )
 
         # If a plan was captured during this query, prepend it to the result
         # so the orchestrator can see and review it.

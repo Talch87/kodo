@@ -7,6 +7,23 @@ from typing import Any
 
 
 @dataclass
+class MockTextBlock:
+    """Mimics claude_agent_sdk.types.TextBlock."""
+
+    text: str
+
+
+@dataclass
+class MockAssistantMessage:
+    """Mimics claude_agent_sdk.AssistantMessage."""
+
+    content: list = field(default_factory=list)
+    model: str = "mock"
+    parent_tool_use_id: str | None = None
+    error: Any = None
+
+
+@dataclass
 class MockResultMessage:
     """Mimics claude_agent_sdk.ResultMessage."""
 

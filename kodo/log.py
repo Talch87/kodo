@@ -152,10 +152,17 @@ _run_stats = RunStats()
 
 
 def init(run_dir: RunDir) -> Path:
-    """Initialize logging for a run. Returns the log file path."""
+    """Initialize logging for a run. Returns the log file path.
+
+    Safe to call multiple times for the same run — only resets on the first
+    call or when the run_id changes.
+    """
     global _log_file, _run_id, _start_time, _run_stats, _virtual_cost_note_shown
 
     from kodo import __version__
+
+    if _run_id == run_dir.run_id and _log_file is not None:
+        return _log_file
 
     _run_id = run_dir.run_id
     _start_time = time.monotonic()
