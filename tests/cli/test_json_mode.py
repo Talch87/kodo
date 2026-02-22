@@ -14,6 +14,7 @@ from unittest.mock import patch
 import pytest
 
 from kodo.cli import _main_inner, launch_run
+from kodo.factory import Mode
 from kodo.log import RunDir
 from kodo.orchestrators.base import RunResult, CycleResult
 
@@ -181,10 +182,19 @@ class TestLaunchRunReturnsResult:
 
         fake_team = {"worker": Agent(FakeSession(), "test worker")}
 
+        fake_mode = Mode(
+            name="saga",
+            description="test",
+            system_prompt="test",
+            build_team=lambda _budget: fake_team,
+            default_max_exchanges=30,
+            default_max_cycles=5,
+        )
+
         with (
             patch("kodo.cli.build_orchestrator") as mock_orch,
             patch("kodo.cli.load_team_config", return_value=None),
-            patch("kodo.factory._build_team_saga", return_value=fake_team),
+            patch("kodo.cli.get_mode", return_value=fake_mode),
         ):
             mock_orch.return_value.run.return_value = fake_result
             mock_orch.return_value.model = "test"
