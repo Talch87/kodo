@@ -437,6 +437,29 @@ def parse_run(log_file: Path) -> RunState | None:
     )
 
 
+def list_runs(project_dir: Path | None = None) -> list[RunState]:
+    """Return all parsed runs, newest first. Optionally filter by *project_dir*."""
+    candidates: list[Path] = []
+    runs_dir = _runs_root()
+    if runs_dir.exists():
+        for d in sorted(runs_dir.iterdir(), reverse=True):
+            if d.is_dir():
+                f = d / "run.jsonl"
+                if f.exists():
+                    candidates.append(f)
+
+    resolved = str(project_dir.resolve()) if project_dir else None
+    runs: list[RunState] = []
+    for f in candidates:
+        state = parse_run(f)
+        if state is None:
+            continue
+        if resolved and state.project_dir != resolved:
+            continue
+        runs.append(state)
+    return runs
+
+
 def find_incomplete_runs(project_dir: Path) -> list[RunState]:
     """Scan ~/.kodo/runs/ for incomplete runs belonging to *project_dir*, newest first.
 

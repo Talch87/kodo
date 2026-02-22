@@ -1,0 +1,41 @@
+# CI Assistant — issue handler
+#
+# Only triggers on issues containing "@@ci-bot" in the title or body.
+# This avoids reacting to bot-created issues or regular discussion.
+#
+# When triggered:
+#   1. Bot tries to reproduce the problem
+#   2. Comments with findings
+#   3. Trivial fix → pushes directly to main
+#   4. Non-trivial fix → creates a PR
+#   5. Can't fix → leaves diagnostic comment only
+#
+# Secrets required: CI_ASSISTANT_URL, CI_ASSISTANT_SECRET
+
+name: CI Assistant (Issues)
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  handle-issue:
+    if: >-
+      contains(github.event.issue.title, '@@ci-bot')
+      || contains(github.event.issue.body, '@@ci-bot')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify CI Assistant
+        run: |
+          jq -n \
+            --arg repo "${{ github.repository }}" \
+            --arg ref "main" \
+            --arg event "issue_opened" \
+            --argjson issue_number ${{ github.event.issue.number }} \
+            --arg details "$(echo '${{ toJSON(github.event.issue) }}' | jq -r '"Title: \(.title)\nAuthor: \(.user.login)\nLabels: \([.labels[].name] | join(", "))\n\nBody:\n\(.body // "No description")"')" \
+            '{repo: $repo, ref: $ref, event: $event, issue_number: $issue_number, details: $details}' \
+            > /tmp/payload.json
+          curl -s -X POST "${{ secrets.CI_ASSISTANT_URL }}/webhook" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.CI_ASSISTANT_SECRET }}" \
+            -d @/tmp/payload.json

@@ -865,7 +865,45 @@ def run_intake_noninteractive(
     return None
 
 
+def _cmd_runs() -> None:
+    """List all known runs from ~/.kodo/runs/."""
+    parser = argparse.ArgumentParser(description="List kodo runs")
+    parser.add_argument(
+        "project_dir",
+        nargs="?",
+        default=None,
+        help="Filter to runs for this project directory",
+    )
+    args = parser.parse_args(sys.argv[2:])
+
+    project = Path(args.project_dir).resolve() if args.project_dir else None
+    runs = log.list_runs(project)
+
+    if not runs:
+        print("No runs found.")
+        return
+
+    # Column widths
+    id_w = max(len(r.run_id) for r in runs)
+    dir_w = max(len(r.project_dir) for r in runs)
+
+    header = f"  {'RUN ID':<{id_w}}  {'STATUS':<10}  {'PROJECT':<{dir_w}}  GOAL"
+    print(header)
+    print("  " + "-" * (len(header) - 2))
+    for r in runs:
+        status = "done" if r.finished else f"cycle {r.completed_cycles}/{r.max_cycles}"
+        goal_snippet = r.goal[:60].replace("\n", " ")
+        if len(r.goal) > 60:
+            goal_snippet += "..."
+        print(f"  {r.run_id:<{id_w}}  {status:<10}  {r.project_dir:<{dir_w}}  {goal_snippet}")
+
+
 def _main_inner() -> None:
+    # Handle subcommands before argparse
+    if len(sys.argv) > 1 and sys.argv[1] == "runs":
+        _cmd_runs()
+        return
+
     parser = argparse.ArgumentParser(
         description="kodo — autonomous multi-agent coding",
     )
