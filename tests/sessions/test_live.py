@@ -125,9 +125,10 @@ class TestCodexSession:
 
     def test_tracks_tokens(self, result_and_session) -> None:
         _, session = result_and_session
-        assert session.stats.total_input_tokens > 0 or session.stats.total_output_tokens > 0, (
-            "No tokens tracked"
-        )
+        assert (
+            session.stats.total_input_tokens > 0
+            or session.stats.total_output_tokens > 0
+        ), "No tokens tracked"
 
     def test_bad_model_returns_error(self, project_dir: Path) -> None:
         from kodo.sessions.codex import CodexSession

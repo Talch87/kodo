@@ -79,61 +79,24 @@ class RunResult:
         return self.cycles[-1].summary if self.cycles else ""
 
 
-# ── Goal refinement ──────────────────────────────────────────────────────
-
-REFINEMENT_PROMPT = """\
-You are reviewing a project goal before implementation begins.
-
-# Goal
-
-{goal}
-
-# Your task
-
-Answer these questions concisely (2-3 sentences each):
-
-1. **Implicit constraints**: What requirements does this goal imply that aren't \
-stated explicitly? (e.g. "works offline" implies no CDN/external resources)
-
-2. **Simplest viable architecture**: What is the simplest architecture that \
-fully achieves this goal? Name the specific approach (not multiple options).
-
-3. **Common traps**: What's the most likely over-engineering mistake or wrong \
-technology choice for this goal?
-
-Write ONLY the answers, no preamble. Be specific and practical.
-""".strip()
-
-# TODO: The canned questions above are a starting point. Experiment with whether
-# letting the LLM ask its own probing questions (rather than canned ones) produces
-# better refinement. The hypothesis is that canned "is this the simplest
-# architecture" almost never hurts, but LLM-generated questions might catch
-# domain-specific traps that canned questions miss.
-
-
 # NOTE: If the orchestrator still over-specifies tasks despite this prompt,
 # the next step is to insert an LLM layer between the orchestrator and the
 # team that strips implementation details from directives, passing through
 # only the WHAT/WHY and letting agents decide HOW.
 ORCHESTRATOR_SYSTEM_PROMPT = """
-You are an orchestrator. Your ONLY job is to get the user's desired outcome.
+You are an orchestrator. Get the user's desired outcome.
 
-Key insight: your agents have full codebase access and are expert coders.
-They are better than you at implementation decisions. Every detail you specify
-risks making the result worse. Specify WHAT the user wants, never HOW to build it.
+Your agents have full codebase access and are expert coders. Every implementation
+detail you specify risks making the result worse. Tell them WHAT, never HOW.
 
-Your role:
-1. Define the desired outcome clearly (user-facing behavior, not code structure).
-2. Break work into small, verifiable checkpoints.
-3. Delegate each checkpoint as a goal, not as instructions.
-4. Verify results match user intent. Commit good work, revert bad iterations.
+1. Define desired outcome (user-facing behavior, not code structure).
+2. Delegate as small, verifiable goals.
+3. Verify results match intent. Commit good work, revert bad iterations.
 
-The team shares .kodo/architecture.md — the architect updates it during reviews,
-workers read it before coding and write critique there if they disagree.
-You don't relay architectural decisions; the file does that.
+The team shares .kodo/architecture.md — the architect updates it, workers read it.
 
-What you decide: priorities, scope, what "done" looks like, when to revert.
-What agents decide: code structure, libraries, patterns, file organization.
+You decide: priorities, scope, what "done" looks like, when to revert.
+Agents decide: code structure, libraries, patterns, file organization.
 """.strip()
 
 
@@ -478,7 +441,6 @@ class Orchestrator(Protocol):
         resume: ResumeState | None = None,
         plan: GoalPlan | None = None,
         verifiers: dict | None = None,
-        auto_refine: bool = False,
     ) -> RunResult:
         """Run multiple cycles until done or limit reached."""
         ...
@@ -494,62 +456,6 @@ class OrchestratorBase:
 
     model: str
     _orchestrator_name: str
-
-    def refine_goal(
-        self,
-        goal: str,
-        project_dir: Path,
-        team: TeamConfig,
-    ) -> str:
-        """Ask a worker to analyze the goal before implementation begins.
-
-        Returns the original goal with refinement constraints appended,
-        or the original goal unchanged if refinement fails.
-        """
-        from kodo import log
-
-        # Pick the smartest available worker for refinement
-        worker = (
-            team.get("worker_smart")
-            or team.get("worker")
-            or next(iter(team.values()), None)
-        )
-        if worker is None:
-            return goal
-
-        worker_name = next(
-            (n for n, a in team.items() if a is worker), "worker"
-        )
-
-        prompt = REFINEMENT_PROMPT.format(goal=goal)
-        log.tprint("[refine] analyzing goal before implementation...")
-        log.emit("goal_refinement_start", goal=goal)
-
-        try:
-            result = worker.run(
-                prompt,
-                project_dir,
-                new_conversation=True,
-                agent_name=f"{worker_name}_refinement",
-            )
-            analysis = (result.text or "").strip()
-        except Exception as exc:
-            log.emit("goal_refinement_error", error=str(exc))
-            log.tprint(f"[refine] failed ({exc}), proceeding with original goal")
-            return goal
-
-        if not analysis:
-            return goal
-
-        log.emit("goal_refinement_done", analysis=analysis[:3000])
-        log.tprint(f"[refine] done — constraints surfaced")
-
-        refined = (
-            f"{goal}\n\n"
-            f"# Pre-implementation analysis\n\n"
-            f"{analysis}"
-        )
-        return refined
 
     def cycle(
         self,
@@ -692,10 +598,6 @@ class OrchestratorBase:
         """Original single-goal execution loop."""
         from kodo import log
 
-        # Refine goal on first cycle (not on resume)
-        if start_cycle == 1:
-            goal = self.refine_goal(goal, project_dir, team)
-
         for i in range(start_cycle, max_cycles + 1):
             if i > 1:
                 log.tprint(f"\n[orchestrator] === CYCLE {i}/{max_cycles} ===")
@@ -739,10 +641,6 @@ class OrchestratorBase:
 
         global_cycle = 0
         stage_summaries: list[str] = []
-
-        # Refine goal before first stage (not on resume)
-        if not resume:
-            goal = self.refine_goal(goal, project_dir, team)
 
         # Resume support: skip completed stages
         start_stage_idx = 0

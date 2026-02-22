@@ -176,46 +176,78 @@ def test_find_incomplete_runs_newest_first(tmp_path: Path):
     project.mkdir()
 
     # Completed run — should not appear
-    _make_run("run_complete", [
-        {
-            "event": "run_start", "goal": "g", "orchestrator": "api",
-            "model": "m", "project_dir": str(project),
-            "max_exchanges": 30, "max_cycles": 5, "team": [],
-        },
-        _CLI_ARGS,
-        {"event": "cycle_end", "summary": "done"},
-        {"event": "run_end"},
-    ])
+    _make_run(
+        "run_complete",
+        [
+            {
+                "event": "run_start",
+                "goal": "g",
+                "orchestrator": "api",
+                "model": "m",
+                "project_dir": str(project),
+                "max_exchanges": 30,
+                "max_cycles": 5,
+                "team": [],
+            },
+            _CLI_ARGS,
+            {"event": "cycle_end", "summary": "done"},
+            {"event": "run_end"},
+        ],
+    )
 
     # Incomplete with 0 cycles — should not appear (no cycle_end)
-    _make_run("run_nocycles", [
-        {
-            "event": "run_start", "goal": "g", "orchestrator": "api",
-            "model": "m", "project_dir": str(project),
-            "max_exchanges": 30, "max_cycles": 5, "team": [],
-        },
-        _CLI_ARGS,
-    ])
+    _make_run(
+        "run_nocycles",
+        [
+            {
+                "event": "run_start",
+                "goal": "g",
+                "orchestrator": "api",
+                "model": "m",
+                "project_dir": str(project),
+                "max_exchanges": 30,
+                "max_cycles": 5,
+                "team": [],
+            },
+            _CLI_ARGS,
+        ],
+    )
 
     # Two incomplete runs with cycles
-    _make_run("aaa_older", [
-        {
-            "event": "run_start", "goal": "g1", "orchestrator": "api",
-            "model": "m", "project_dir": str(project),
-            "max_exchanges": 30, "max_cycles": 5, "team": [],
-        },
-        _CLI_ARGS,
-        {"event": "cycle_end", "summary": "older"},
-    ])
-    _make_run("zzz_newer", [
-        {
-            "event": "run_start", "goal": "g2", "orchestrator": "api",
-            "model": "m", "project_dir": str(project),
-            "max_exchanges": 30, "max_cycles": 5, "team": [],
-        },
-        _CLI_ARGS,
-        {"event": "cycle_end", "summary": "newer"},
-    ])
+    _make_run(
+        "aaa_older",
+        [
+            {
+                "event": "run_start",
+                "goal": "g1",
+                "orchestrator": "api",
+                "model": "m",
+                "project_dir": str(project),
+                "max_exchanges": 30,
+                "max_cycles": 5,
+                "team": [],
+            },
+            _CLI_ARGS,
+            {"event": "cycle_end", "summary": "older"},
+        ],
+    )
+    _make_run(
+        "zzz_newer",
+        [
+            {
+                "event": "run_start",
+                "goal": "g2",
+                "orchestrator": "api",
+                "model": "m",
+                "project_dir": str(project),
+                "max_exchanges": 30,
+                "max_cycles": 5,
+                "team": [],
+            },
+            _CLI_ARGS,
+            {"event": "cycle_end", "summary": "newer"},
+        ],
+    )
 
     runs = log.find_incomplete_runs(project)
     assert len(runs) == 2

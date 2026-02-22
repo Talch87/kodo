@@ -466,9 +466,7 @@ def find_incomplete_runs(project_dir: Path) -> list[RunState]:
     An incomplete run has a run_start + at least 1 cycle_end but no run_end.
     """
     return [
-        r
-        for r in list_runs(project_dir)
-        if not r.finished and r.completed_cycles >= 1
+        r for r in list_runs(project_dir) if not r.finished and r.completed_cycles >= 1
     ]
 
 

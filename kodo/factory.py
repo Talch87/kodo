@@ -98,44 +98,26 @@ class Mode:
 # ---------------------------------------------------------------------------
 
 _WORKER_COMMON = (
-    "It has full codebase access, can run tests, and execute git commands.\n"
-    "Give it a SHORT directive (1-3 sentences) describing desired BEHAVIOR, "
-    "not implementation. It reads .kodo/architecture.md for architectural context.\n"
-    "If it seems stuck, set new_conversation=true with a fresh directive.\n"
-    "If the result contains [Context was reset: ...], give enough context in your "
-    "next directive for the worker to continue effectively."
+    "Directive: 1-3 sentences describing desired BEHAVIOR, not implementation.\n"
+    "If stuck, set new_conversation=true with a fresh directive."
 )
 
 _WORKER_FAST_DESC = (
-    "A fast coding agent (Cursor) for straightforward implementation tasks.\n"
-    "Best for: writing new code, simple refactors, adding features with clear specs, "
-    "file edits, and any task where speed matters more than deep reasoning.\n"
+    "Fast coding agent — use for straightforward tasks where speed matters.\n"
     + _WORKER_COMMON
 )
 
 _WORKER_SMART_DESC = (
-    "A powerful reasoning agent (Claude Code) for complex tasks requiring deep thinking.\n"
-    "Best for: debugging tricky issues, architectural decisions, complex refactors, "
-    "tasks requiring understanding of large codebases, and anything where the fast "
-    "worker struggled.\n" + _WORKER_COMMON
+    "Powerful reasoning agent — use for complex tasks, debugging, or when the fast worker struggled.\n"
+    + _WORKER_COMMON
 )
 
-# Extra instructions only relevant in saga mode (with tester/architect)
-_ARCH_FILE_NOTE = (
-    "\nRead .kodo/architecture.md before starting. If the architecture is wrong or "
-    "unworkable, write your critique to the same file instead of silently deviating."
-)
+_SAGA_EXTRA = "\nEach task: ONE independently testable feature or change."
 
-_WORKER_FAST_SAGA_EXTRA = (
-    "\nEach task should be ONE feature or change that can be built and tested independently."
-    + _ARCH_FILE_NOTE
-)
+_WORKER_FAST_SAGA_EXTRA = _SAGA_EXTRA
 
 _WORKER_SMART_SAGA_EXTRA = (
-    "\nEach task should be ONE feature or change that can be built and tested independently.\n"
-    "If the result contains [PROPOSED PLAN], review it. If good, tell the worker: "
-    '"Plan approved, proceed with implementation." If you want changes, describe them.'
-    + _ARCH_FILE_NOTE
+    _SAGA_EXTRA + "\nIf result contains [PROPOSED PLAN], approve or request changes."
 )
 
 
@@ -178,12 +160,8 @@ def _build_team_saga(
         )
         team["tester"] = Agent(
             tester_session,
-            "A testing agent that verifies features work end-to-end.\n"
-            "After 1-2 worker steps, ask the tester to verify with a user-experience "
-            'description (e.g. "a user should be able to...").\n'
-            "Fix any issues the tester finds before moving on to the next feature.\n"
-            "The tester runs the app, checks output, and reports what works and what's broken. "
-            "It does not fix anything.",
+            "Verifies features end-to-end. Give it a user-experience description to check.\n"
+            "Reports what works and what's broken. Does not fix anything.",
             max_turns=20,
             timeout_s=tester_timeout_s,
         )
@@ -197,11 +175,8 @@ def _build_team_saga(
         )
         team["tester_browser"] = Agent(
             tester_browser_session,
-            "A testing agent with browser access for web applications.\n"
-            "Use this instead of the regular tester when the project has a web UI. "
-            "It opens the app in a real browser, interacts with it, and takes screenshots.\n"
-            "Give it a user-experience description to verify. It reports issues but does not "
-            "fix anything.",
+            "Tester with real browser access — use for web UI verification.\n"
+            "Reports issues but does not fix anything.",
             max_turns=20,
             timeout_s=tester_timeout_s,
         )
@@ -244,10 +219,8 @@ def _build_team_saga(
         )
         team["architect"] = Agent(
             architect_session,
-            "Code reviewer. Identifies bugs and structural issues with specific "
-            "file/line references. Updates .kodo/architecture.md with decisions during reviews.\n"
-            "Workers read that file; you don't need to relay its decisions. "
-            "It does not implement features.",
+            "Code reviewer. Updates .kodo/architecture.md with decisions.\n"
+            "Does not implement features.",
             max_turns=10,
             timeout_s=architect_timeout_s,
         )
@@ -325,28 +298,20 @@ def _mission_system_prompt() -> str:
 
     if _has_fast and _has_claude:
         workers_desc = (
-            "You have a fast worker and a smart worker "
-            "(Claude Code). Use the fast worker for straightforward tasks and the smart "
-            "worker for complex reasoning or when the fast worker struggles."
+            "You have a fast worker and a smart worker. "
+            "Use fast for straightforward tasks, smart for complex reasoning."
         )
     elif _has_fast:
-        workers_desc = "You have a fast worker. Use it for all coding tasks."
+        workers_desc = "You have a fast worker."
     else:
-        workers_desc = (
-            "You have a smart worker (Claude Code). Use it for all coding tasks."
-        )
+        workers_desc = "You have a smart worker."
 
     return f"""\
 You are an orchestrator solving one focused issue. {workers_desc}
 
-Your workers have full codebase access and are expert coders. Tell them
-WHAT outcome you want, not HOW to implement it. Over-specifying makes
-results worse — the worker sees the code, you don't.
+Tell workers WHAT outcome you want, not HOW. Over-specifying makes results worse.
 
-Your job: define the desired outcome, delegate, verify the result solves
-the goal, send back with specific feedback if not. Call done when solved.
-
-Keep directives to 1-3 sentences describing desired behavior."""
+Delegate, verify, send back with specific feedback if wrong. Call done when solved."""
 
 
 # ---------------------------------------------------------------------------

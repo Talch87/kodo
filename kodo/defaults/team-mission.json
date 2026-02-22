@@ -12,14 +12,14 @@
     "worker_fast": {
       "backend": "cursor",
       "model": "composer-1.5",
-      "description": "A fast coding agent (Cursor) for straightforward implementation tasks.\nBest for: writing new code, simple refactors, adding features with clear specs, file edits, and any task where speed matters more than deep reasoning.\nIt has full codebase access, can run tests, and execute git commands.\nGive it a SHORT directive (1-3 sentences) describing desired BEHAVIOR, not implementation. It reads .kodo/architecture.md for architectural context.\nIf it seems stuck, set new_conversation=true with a fresh directive.\nIf the result contains [Context was reset: ...], give enough context in your next directive for the worker to continue effectively.",
+      "description": "Fast coding agent — use for straightforward tasks where speed matters.\nDirective: 1-3 sentences describing desired BEHAVIOR, not implementation.\nIf stuck, set new_conversation=true with a fresh directive.",
       "max_turns": 30,
       "timeout_s": 1800
     },
     "worker_smart": {
       "backend": "claude",
       "model": "opus",
-      "description": "A powerful reasoning agent (Claude Code) for complex tasks requiring deep thinking.\nBest for: debugging tricky issues, architectural decisions, complex refactors, tasks requiring understanding of large codebases, and anything where the fast worker struggled.\nIt has full codebase access, can run tests, and execute git commands.\nGive it a SHORT directive (1-3 sentences) describing desired BEHAVIOR, not implementation. It reads .kodo/architecture.md for architectural context.\nIf it seems stuck, set new_conversation=true with a fresh directive.\nIf the result contains [Context was reset: ...], give enough context in your next directive for the worker to continue effectively.",
+      "description": "Powerful reasoning agent — use for complex tasks, debugging, or when the fast worker struggled.\nDirective: 1-3 sentences describing desired BEHAVIOR, not implementation.\nIf stuck, set new_conversation=true with a fresh directive.",
       "max_turns": 30,
       "timeout_s": 1800,
       "fallback_model": "sonnet"

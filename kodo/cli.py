@@ -47,43 +47,29 @@ def _print_banner() -> None:
 
 
 _INTAKE_PREAMBLE = """\
-You are a project intake interviewer helping refine a software project goal{purpose}.
+You are refining a software project goal{purpose}.
 
-The user will give you their goal as the first message. Your job:
-1. Read it carefully
-2. Ask 2-3 focused clarifying questions about constraints, tech choices, \
-edge cases, architecture preferences, and scope
-3. Have a natural conversation to fill in gaps
-4. When you have enough clarity, write {output}
-
-Start by acknowledging the goal briefly, then ask your first questions.
-Keep the conversation focused and practical — don't over-interview."""
+Ask 2-3 clarifying questions about constraints, tech choices, and scope.
+When clear enough, write {output}."""
 
 _INTAKE_STAGES_SUFFIX = """
 
-The JSON format MUST be:
-{
-  "context": "Shared architectural context — tech stack, key files, conventions",
+JSON format:
+{{
+  "context": "Shared context — tech stack, key files, conventions",
   "stages": [
-    {
+    {{
       "index": 1,
       "name": "Short label",
-      "description": "Full prose description of what this stage accomplishes",
-      "acceptance_criteria": "Verifiable definition of done for this stage",
+      "description": "What this stage accomplishes",
+      "acceptance_criteria": "Verifiable definition of done",
       "browser_testing": false
-    }
+    }}
   ]
-}
+}}
 
-Set "browser_testing" to true ONLY for stages that build or modify a web UI \
-that should be verified in a real browser. Default is false.
-
-Guidelines for staging:
-- Break non-trivial goals into 2-5 stages
-- Each stage should be independently verifiable
-- Order stages so later ones build on earlier ones
-- Trivially simple goals can be a single stage
-- Each stage should be completable in 1-3 orchestrator cycles"""
+Set browser_testing=true only for stages with web UI to verify in a browser.
+Break into 2-5 independently verifiable stages, ordered by dependency."""
 
 
 def _build_intake_prompt(output_path: str, staged: bool) -> str:
@@ -247,6 +233,78 @@ def _read_intake_output(output_file: Path, staged: bool) -> GoalPlan | str | Non
             print(f"\nRefined goal read from {output_file}")
             return refined
         return None
+
+
+_AUTO_REFINE_PROMPT = """\
+Review this goal before implementation:
+
+{goal}
+
+Concisely answer (2-3 sentences each):
+1. **Implicit constraints** — what does this goal imply that isn't stated?
+2. **Simplest architecture** — one specific approach, not options.
+3. **Common traps** — most likely over-engineering mistake?
+
+Then write a refined goal to {output_path} incorporating the original intent \
+plus implicit constraints. Keep it concise — an autonomous agent will read it.
+"""
+
+# TODO: The canned questions above are a starting point. Experiment with whether
+# letting the LLM ask its own probing questions (rather than canned ones) produces
+# better refinement. The hypothesis is that canned "is this the simplest
+# architecture" almost never hurts, but LLM-generated questions might catch
+# domain-specific traps that canned questions miss.
+
+
+def run_intake_auto(
+    backend: str,
+    run_dir: RunDir,
+    goal_text: str,
+) -> str | None:
+    """Automated goal refinement — no human in the loop.
+
+    Uses the same session as interactive intake but sends a single structured
+    prompt instead of a conversation. Returns the refined goal string, or None
+    if refinement failed.
+    """
+    run_dir.root.mkdir(parents=True, exist_ok=True)
+
+    goal_path = run_dir.goal_file
+    goal_path.write_text(goal_text)
+
+    output_file = run_dir.goal_refined_file
+    prompt = _AUTO_REFINE_PROMPT.format(goal=goal_text, output_path=str(output_file))
+    model = "opus" if backend == "claude" else "composer-1.5"
+    session = make_session(backend, model, budget=None, system_prompt=prompt)
+
+    project_dir = run_dir.project_dir
+    print("\n--- Auto-refining goal (no human input) ---")
+
+    with _Spinner("Analyzing goal"):
+        result = session.query(
+            f"Here's the project goal to analyze:\n\n{goal_text}",
+            project_dir,
+            max_turns=10,
+        )
+
+    print(f"\n{result.text}\n")
+
+    if output_file.exists():
+        refined = output_file.read_text().strip()
+        if refined:
+            print(f"Refined goal written to {output_file}")
+            return refined
+
+    # LLM didn't write the file — use its response as the refinement
+    analysis = (result.text or "").strip()
+    if analysis:
+        refined = f"{goal_text}\n\n# Pre-implementation analysis\n\n{analysis}"
+        output_file.write_text(refined)
+        print(f"Refined goal written to {output_file}")
+        return refined
+
+    print("Auto-refinement produced no output; using original goal.")
+    return None
 
 
 def _looks_staged(goal_text: str) -> bool:
@@ -493,7 +551,6 @@ def launch_run(
     params: dict,
     plan: GoalPlan | None = None,
     json_mode: bool = False,
-    auto_refine: bool = False,
 ):
     """Build team + orchestrator and run. Returns the RunResult."""
     # Snapshot config and goal into the run directory
@@ -553,7 +610,6 @@ def launch_run(
         max_cycles=max_cycles,
         plan=plan,
         verifiers=verifiers,
-        auto_refine=auto_refine,
     )
 
     if not json_mode:
@@ -897,7 +953,9 @@ def _cmd_runs() -> None:
         goal_snippet = r.goal[:60].replace("\n", " ")
         if len(r.goal) > 60:
             goal_snippet += "..."
-        print(f"  {r.run_id:<{id_w}}  {status:<10}  {r.project_dir:<{dir_w}}  {goal_snippet}")
+        print(
+            f"  {r.run_id:<{id_w}}  {status:<10}  {r.project_dir:<{dir_w}}  {goal_snippet}"
+        )
 
 
 def _main_inner() -> None:
@@ -1090,6 +1148,11 @@ def _main_inner() -> None:
         if existing_plan:
             plan = existing_plan
             print(f"Using existing goal plan ({len(plan.stages)} stages)")
+        elif args.auto_refine:
+            backend = "claude" if has_claude() else "cursor"
+            refined = run_intake_auto(backend, run_dir, goal_text)
+            if refined:
+                goal_text = refined
         elif not args.skip_intake:
             plan = run_intake_noninteractive(run_dir, goal_text)
     else:
@@ -1108,11 +1171,17 @@ def _main_inner() -> None:
                 plan = existing_plan
 
         if plan is None:
-            intake_result = _offer_intake(run_dir, goal_text)
-            if isinstance(intake_result, GoalPlan):
-                plan = intake_result
-            elif isinstance(intake_result, str):
-                goal_text = intake_result
+            if args.auto_refine:
+                backend = "claude" if has_claude() else "cursor"
+                refined = run_intake_auto(backend, run_dir, goal_text)
+                if refined:
+                    goal_text = refined
+            else:
+                intake_result = _offer_intake(run_dir, goal_text)
+                if isinstance(intake_result, GoalPlan):
+                    plan = intake_result
+                elif isinstance(intake_result, str):
+                    goal_text = intake_result
 
     # 5. Summary and confirm
     if not args.json:
@@ -1127,7 +1196,9 @@ def _main_inner() -> None:
             for s in plan.stages:
                 print(f"                  {s.index}. {s.name}")
         print(f"  Mode:         {mode.name} — {mode.description}")
-        print(f"  Orchestrator: {params['orchestrator']} ({params['orchestrator_model']})")
+        print(
+            f"  Orchestrator: {params['orchestrator']} ({params['orchestrator_model']})"
+        )
         print(
             f"  Exchanges:    {params['max_exchanges']}/cycle, {params['max_cycles']} cycles"
         )
@@ -1148,10 +1219,7 @@ def _main_inner() -> None:
             sys.exit(0)
 
     # 6. Launch
-    result = launch_run(
-        run_dir, goal_text, params, plan=plan, json_mode=args.json,
-        auto_refine=args.auto_refine,
-    )
+    result = launch_run(run_dir, goal_text, params, plan=plan, json_mode=args.json)
     _emit_json_and_exit(args, result)
 
 

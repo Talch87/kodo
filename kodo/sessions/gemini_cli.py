@@ -143,8 +143,7 @@ class GeminiCliSession:
                     total_calls = tool_stats.get("totalCalls", 0)
                     if total_calls:
                         result_text = (
-                            f"[completed {total_calls} tool call(s), "
-                            f"no text response]"
+                            f"[completed {total_calls} tool call(s), no text response]"
                         )
                     else:
                         result_text = "[completed, no text response]"

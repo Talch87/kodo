@@ -12,14 +12,14 @@
     "worker_fast": {
       "backend": "cursor",
       "model": "composer-1.5",
-      "description": "A fast coding agent (Cursor) for straightforward implementation tasks.\nBest for: writing new code, simple refactors, adding features with clear specs, file edits, and any task where speed matters more than deep reasoning.\nIt has full codebase access, can run tests, and execute git commands.\nGive it a SHORT directive (1-3 sentences) describing desired BEHAVIOR, not implementation. It reads .kodo/architecture.md for architectural context.\nIf it seems stuck, set new_conversation=true with a fresh directive.\nIf the result contains [Context was reset: ...], give enough context in your next directive for the worker to continue effectively.\nEach task should be ONE feature or change that can be built and tested independently.\nRead .kodo/architecture.md before starting. If the architecture is wrong or unworkable, write your critique to the same file instead of silently deviating.",
+      "description": "Fast coding agent — use for straightforward tasks where speed matters.\nDirective: 1-3 sentences describing desired BEHAVIOR, not implementation.\nIf stuck, set new_conversation=true with a fresh directive.\nEach task: ONE independently testable feature or change.",
       "max_turns": 30,
       "timeout_s": 1800
     },
     "worker_smart": {
       "backend": "claude",
       "model": "opus",
-      "description": "A powerful reasoning agent (Claude Code) for complex tasks requiring deep thinking.\nBest for: debugging tricky issues, architectural decisions, complex refactors, tasks requiring understanding of large codebases, and anything where the fast worker struggled.\nIt has full codebase access, can run tests, and execute git commands.\nGive it a SHORT directive (1-3 sentences) describing desired BEHAVIOR, not implementation. It reads .kodo/architecture.md for architectural context.\nIf it seems stuck, set new_conversation=true with a fresh directive.\nIf the result contains [Context was reset: ...], give enough context in your next directive for the worker to continue effectively.\nEach task should be ONE feature or change that can be built and tested independently.\nIf the result contains [PROPOSED PLAN], review it. If good, tell the worker: \"Plan approved, proceed with implementation.\" If you want changes, describe them.\nRead .kodo/architecture.md before starting. If the architecture is wrong or unworkable, write your critique to the same file instead of silently deviating.",
+      "description": "Powerful reasoning agent — use for complex tasks, debugging, or when the fast worker struggled.\nDirective: 1-3 sentences describing desired BEHAVIOR, not implementation.\nIf stuck, set new_conversation=true with a fresh directive.\nEach task: ONE independently testable feature or change.\nIf result contains [PROPOSED PLAN], approve or request changes.",
       "max_turns": 30,
       "timeout_s": 1800,
       "fallback_model": "sonnet"
@@ -27,7 +27,7 @@
     "tester": {
       "backend": "cursor",
       "model": "composer-1.5",
-      "description": "A testing agent that verifies features work end-to-end.\nAfter 1-2 worker steps, ask the tester to verify with a user-experience description (e.g. \"a user should be able to...\").\nFix any issues the tester finds before moving on to the next feature.\nThe tester runs the app, checks output, and reports what works and what's broken. It does not fix anything.",
+      "description": "Verifies features end-to-end. Give it a user-experience description to check.\nReports what works and what's broken. Does not fix anything.",
       "system_prompt": "You are a tester agent. Verify the desired user experience works end-to-end — run the app, call APIs, check files, verify imports, run scripts.\nFix minor issues yourself. Only report blocking issues with specific error messages.\nSay 'ALL CHECKS PASS' if clean, 'MINOR ISSUES FIXED' if you only fixed cosmetics.",
       "max_turns": 20,
       "timeout_s": 1800
@@ -35,7 +35,7 @@
     "tester_browser": {
       "backend": "cursor",
       "model": "composer-1.5",
-      "description": "A testing agent with browser access for web applications.\nUse this instead of the regular tester when the project has a web UI. It opens the app in a real browser, interacts with it, and takes screenshots.\nGive it a user-experience description to verify. It reports issues but does not fix anything.",
+      "description": "Tester with real browser access — use for web UI verification.\nReports issues but does not fix anything.",
       "system_prompt": "You are a tester agent with browser access. Verify the app works by opening it in a real browser — navigate the UI, click buttons, fill forms, check rendering.\nFix minor issues yourself. Only report blocking issues with specific error messages.\nSay 'ALL CHECKS PASS' if clean, 'MINOR ISSUES FIXED' if you only fixed cosmetics.",
       "max_turns": 20,
       "timeout_s": 1800,
@@ -44,7 +44,7 @@
     "architect": {
       "backend": "claude",
       "model": "opus",
-      "description": "Code reviewer. Identifies bugs and structural issues with specific file/line references. Updates .kodo/architecture.md with decisions during reviews.\nWorkers read that file; you don't need to relay its decisions. It does not implement features.",
+      "description": "Code reviewer. Updates .kodo/architecture.md with decisions.\nDoes not implement features.",
       "system_prompt": "You are the architect. When reviewing code, update .kodo/architecture.md with key decisions, component boundaries, and lessons learned. Keep it concise.\nWorkers read this file before coding and may append critique there.\nIdentify bugs and structural issues with specific file/line references.\nFix minor issues yourself. Only report blocking issues with specific error messages.\nSay 'ALL CHECKS PASS' if clean, 'MINOR ISSUES FIXED' if you only fixed cosmetics.",
       "max_turns": 10,
       "timeout_s": 600,
