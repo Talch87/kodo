@@ -92,6 +92,33 @@ def _build_intake_prompt(output_path: str, staged: bool) -> str:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# ANSI helpers
+# ---------------------------------------------------------------------------
+
+_BOLD = "\033[1m"
+_DIM = "\033[2m"
+_CYAN = "\033[36m"
+_GREEN = "\033[32m"
+_RESET = "\033[0m"
+
+
+def _print_agent(text: str) -> None:
+    """Print an agent response with a visible left-border."""
+    if not text.strip():
+        print(f"\n  {_DIM}(no text response){_RESET}\n")
+        return
+    lines = text.rstrip().splitlines()
+    print()
+    for line in lines:
+        print(f"  {_DIM}{_CYAN}│{_RESET} {line}")
+    print()
+
+
+def _print_separator() -> None:
+    print(f"  {_DIM}{'─' * 60}{_RESET}")
+
+
 class _Spinner:
     """Simple elapsed-time spinner for long-running operations."""
 
@@ -168,7 +195,8 @@ def run_intake_chat(
     model = "opus" if backend == "claude" else "composer-1.5"
     session = make_session(backend, model, budget=None, system_prompt=prompt)
 
-    print("\n--- Intake interview (type /done or empty line to finish) ---")
+    print(f"\n  {_DIM}Intake interview — type {_BOLD}/done{_RESET}{_DIM} or empty line to finish{_RESET}")
+    _print_separator()
 
     # First message — agent explores the project and asks clarifying questions
     project_dir = run_dir.project_dir
@@ -176,13 +204,13 @@ def run_intake_chat(
     with _Spinner("Reviewing project"):
         result = session.query(initial, project_dir, max_turns=10)
     log.emit("intake_response", text=result.text, is_error=result.is_error, turns=result.turns)
-    print(f"\n{result.text}\n")
+    _print_agent(result.text)
 
     # Conversation loop — always wait for user input, even if the agent
     # eagerly wrote the output file (it may still be asking questions)
     while True:
         try:
-            user_input = input("You: ").strip()
+            user_input = input(f"  {_GREEN}{_BOLD}>{_RESET} ").strip()
         except (EOFError, KeyboardInterrupt):
             print()
             break
@@ -193,7 +221,9 @@ def run_intake_chat(
         with _Spinner("Thinking"):
             result = session.query(user_input, project_dir, max_turns=10)
         log.emit("intake_response", text=result.text, is_error=result.is_error, turns=result.turns)
-        print(f"\n{result.text}\n")
+        _print_agent(result.text)
+
+    _print_separator()
 
     # Check if output was written during the conversation
     if output_file.exists():
@@ -206,7 +236,7 @@ def run_intake_chat(
     )
     with _Spinner("Finalizing"):
         result = session.query(finalize_msg, project_dir, max_turns=10)
-    print(f"\n{result.text}\n")
+    _print_agent(result.text)
 
     if output_file.exists():
         return _read_intake_output(output_file, staged)
