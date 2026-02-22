@@ -24,7 +24,7 @@ def project(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _fake_launch(run_dir, goal_text, params, plan=None, json_mode=False):
+def _fake_launch(run_dir, goal_text, params, plan=None, json_mode=False, auto_refine=False):
     """Fake launch_run that returns a successful RunResult."""
     return RunResult(
         cycles=[
@@ -35,7 +35,7 @@ def _fake_launch(run_dir, goal_text, params, plan=None, json_mode=False):
     )
 
 
-def _fake_launch_partial(run_dir, goal_text, params, plan=None, json_mode=False):
+def _fake_launch_partial(run_dir, goal_text, params, plan=None, json_mode=False, auto_refine=False):
     """Fake launch_run that returns a partial RunResult."""
     return RunResult(
         cycles=[

@@ -32,6 +32,7 @@ class FakeSession:
         self._response_text = response_text
         self._is_error = is_error
         self._stats = SessionStats()
+        self.model = "fake-model"
 
     @property
     def stats(self) -> SessionStats:
