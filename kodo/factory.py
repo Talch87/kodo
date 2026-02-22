@@ -207,7 +207,7 @@ def _build_team_saga(
         )
 
     if _has_codex and "worker_fast" not in team:
-        worker_fast_session = make_session("codex", "o4-mini", budget)
+        worker_fast_session = make_session("codex", "gpt-5.2-codex", budget)
         team["worker_fast"] = Agent(
             worker_fast_session,
             _WORKER_FAST_DESC + _WORKER_FAST_SAGA_EXTRA,
@@ -279,7 +279,7 @@ def _build_team_mission(budget: float | None = None) -> TeamConfig:
         )
 
     if _has_codex and "worker_fast" not in team:
-        worker_fast_session = make_session("codex", "o4-mini", budget)
+        worker_fast_session = make_session("codex", "gpt-5.2-codex", budget)
         team["worker_fast"] = Agent(
             worker_fast_session,
             _WORKER_FAST_DESC,

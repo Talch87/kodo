@@ -15,7 +15,7 @@ from kodo.sessions.base import QueryResult, SessionStats
 class CodexSession:
     def __init__(
         self,
-        model: str = "o4-mini",
+        model: str = "gpt-5.2-codex",
         system_prompt: str | None = None,
         resume_session_id: str | None = None,
         sandbox: str = "workspace-write",
@@ -98,6 +98,7 @@ class CodexSession:
         input_tokens = 0
         output_tokens = 0
         raw_messages: list[dict] = []
+        error_messages: list[str] = []
 
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
@@ -124,7 +125,12 @@ class CodexSession:
                 continue
 
             raw_messages.append(msg)
-            event_type = msg.get("type", "")
+
+            # Codex emits two shapes:
+            #   top-level: {"type": "...", ...}
+            #   nested:    {"id": "0", "msg": {"type": "...", ...}}
+            inner = msg.get("msg", {}) if "msg" in msg else {}
+            event_type = msg.get("type", "") or inner.get("type", "")
 
             # Capture session/thread ID
             if event_type == "thread.started":
@@ -132,13 +138,26 @@ class CodexSession:
                 if tid:
                     self._session_id = tid
 
-            # Accumulate token usage from completed turns
+            # Agent text response (current codex format)
+            elif event_type == "agent_message":
+                src = inner if inner else msg
+                text = src.get("message", "")
+                if text:
+                    result_text = text
+
+            # Token counts (current codex format)
+            elif event_type == "token_count":
+                src = inner if inner else msg
+                input_tokens += src.get("input_tokens", 0)
+                output_tokens += src.get("output_tokens", 0)
+
+            # Legacy: accumulate token usage from completed turns
             elif event_type == "turn.completed":
                 usage = msg.get("usage", {})
                 input_tokens += usage.get("input_tokens", 0)
                 output_tokens += usage.get("output_tokens", 0)
 
-            # Capture assistant message text
+            # Legacy: capture assistant message text
             elif event_type == "item.completed":
                 item = msg.get("item", {})
                 if item.get("role") == "assistant":
@@ -146,18 +165,42 @@ class CodexSession:
                         if content.get("type") == "text":
                             result_text = content.get("text", "")
 
-            # Capture errors
+            # Capture errors (top-level or nested)
             elif event_type == "error":
-                error_msg = msg.get("message", msg.get("error", ""))
+                src = inner if inner else msg
+                error_msg = src.get("message", src.get("error", ""))
                 if error_msg:
-                    result_text = error_msg
+                    error_messages.append(error_msg)
+
+            # Capture background_event errors (retries, API failures)
+            elif event_type == "background_event":
+                src = inner if inner else msg
+                bg_msg = src.get("message", "")
+                if "error" in bg_msg.lower() or "status 4" in bg_msg:
+                    error_messages.append(bg_msg)
 
         proc.wait()
         stderr_thread.join(timeout=5)
         elapsed = time.monotonic() - t0
 
         is_error = proc.returncode != 0
-        stderr_text = "".join(stderr_chunks) if is_error else ""
+        stderr_text = "".join(stderr_chunks)
+
+        # Codex may exit 0 even when all API calls failed — detect this
+        if not is_error and not result_text and error_messages:
+            is_error = True
+            # Surface an actionable message for model/auth issues
+            last_err = error_messages[-1]
+            if "not supported" in last_err or "does not exist" in last_err:
+                result_text = (
+                    f"Codex error: {last_err}\n"
+                    f"Check your Codex login ('codex login status') and model "
+                    f"('{self.model}'). ChatGPT accounts support gpt-5.2-codex "
+                    f"and gpt-5.2. API accounts may use o4-mini. "
+                    f"Run 'codex login' to switch auth method."
+                )
+            else:
+                result_text = last_err
 
         self._stats.queries += 1
         self._stats.total_input_tokens += input_tokens

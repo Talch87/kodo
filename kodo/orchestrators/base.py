@@ -520,7 +520,13 @@ class OrchestratorBase:
             project_dir=str(project_dir),
             max_exchanges=max_exchanges,
             max_cycles=max_cycles,
-            team=list(team.keys()),
+            team={
+                name: {
+                    "backend": agent.session.__class__.__name__,
+                    "model": getattr(agent.session, "model", "?"),
+                }
+                for name, agent in team.items()
+            },
             resumed=resume is not None,
             resume_from_cycle=start_cycle if resume else None,
             has_stages=plan is not None and len(plan.stages) > 0,

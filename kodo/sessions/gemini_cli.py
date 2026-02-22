@@ -133,6 +133,21 @@ class GeminiCliSession:
                 if err:
                     is_error = True
                     result_text = result_text or err.get("message", str(err))
+
+                # When response is empty but tool calls happened (file writes,
+                # shell commands), gemini-cli did work but the final model turn
+                # was a tool call, not text.  Report a fallback so the
+                # orchestrator knows something happened.
+                if not result_text and not is_error and output_tokens > 0:
+                    tool_stats = data.get("stats", {}).get("tools", {})
+                    total_calls = tool_stats.get("totalCalls", 0)
+                    if total_calls:
+                        result_text = (
+                            f"[completed {total_calls} tool call(s), "
+                            f"no text response]"
+                        )
+                    else:
+                        result_text = "[completed, no text response]"
             except json.JSONDecodeError:
                 # Fall back to raw text
                 result_text = stdout_text.strip()

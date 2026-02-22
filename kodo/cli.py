@@ -29,6 +29,18 @@ from kodo.orchestrators.base import GoalPlan, GoalStage, ResumeState
 from kodo.team_config import load_team_config, build_team_from_json
 
 
+_BACKEND_LABELS = {
+    "ClaudeSession": "claude code",
+    "CursorSession": "cursor",
+    "CodexSession": "codex",
+    "GeminiCliSession": "gemini cli",
+}
+
+
+def _backend_label(agent) -> str:
+    return _BACKEND_LABELS.get(type(agent.session).__name__, "?")
+
+
 def _print_banner() -> None:
     print(f"\n  kodo v{__version__} — autonomous multi-agent coding")
     print("  https://github.com/ikamen/kodo\n")
@@ -526,7 +538,9 @@ def launch_run(
             team_name = team_config.get("name", "custom")
             print(f"Team config: {team_name}")
         print(f"Orchestrator: {params['orchestrator']} ({orchestrator.model})")
-        print(f"Team: {', '.join(team.keys())}")
+        print("Team:")
+        for k, a in team.items():
+            print(f"  {k} ({_backend_label(a)} / {a.session.model})")
         print(f"Project dir: {project_dir}")
         print(f"Max: {max_exchanges} exchanges/cycle, {max_cycles} cycles")
         if plan:
@@ -614,7 +628,9 @@ def launch_resume(run_dir: RunDir, state: log.RunState):
     print(f"\nResuming run: {state.run_id}")
     print(f"Mode: {mode.name} — {mode.description}")
     print(f"Orchestrator: {params['orchestrator']} ({orchestrator.model})")
-    print(f"Team: {', '.join(team.keys())}")
+    print("Team:")
+    for k, a in team.items():
+        print(f"  {k} ({_backend_label(a)} / {a.session.model})")
     print(f"Completed cycles: {state.completed_cycles}/{state.max_cycles}")
     if state.has_stages:
         print(

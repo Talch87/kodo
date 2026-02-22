@@ -60,8 +60,8 @@ class _SlowSession(FakeSession):
 
 
 def test_agent_timeout_returns_error(tmp_project: Path) -> None:
-    session = _SlowSession(delay=2.0, response_text="too slow")
-    agent = Agent(session, "slow agent", max_turns=5, timeout_s=0.1)
+    session = _SlowSession(delay=0.15, response_text="too slow")
+    agent = Agent(session, "slow agent", max_turns=5, timeout_s=0.01)
     result = agent.run("do something", tmp_project, agent_name="test")
     assert result.is_error is True
     assert "timed out" in result.text.lower()

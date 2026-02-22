@@ -196,7 +196,18 @@ function renderTimeline(events) {
       info += `Orchestrator: ${start.orchestrator || '?'}  Model: ${start.model || '?'}\n`;
       info += `Project: ${start.project_dir || init?.project_dir || '?'}\n`;
       info += `Max exchanges: ${start.max_exchanges || '?'}  Max cycles: ${start.max_cycles || '?'}\n`;
-      if (start.team) info += `Team: ${JSON.stringify(start.team, null, 2)}\n`;
+      if (start.team) {
+        if (typeof start.team === 'object' && !Array.isArray(start.team)) {
+          const _labels = {ClaudeSession:'claude code', CursorSession:'cursor', CodexSession:'codex', GeminiCliSession:'gemini cli'};
+          info += `Team:\n`;
+          for (const [name, d] of Object.entries(start.team)) {
+            const backend = _labels[d.backend] || d.backend || '?';
+            info += `  ${name} (${backend} / ${d.model || '?'})\n`;
+          }
+        } else {
+          info += `Team: ${JSON.stringify(start.team)}\n`;
+        }
+      }
     }
     if (args?.goal_text) {
       info += `\n--- Goal ---\n${args.goal_text}`;
