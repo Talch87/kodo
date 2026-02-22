@@ -1,7 +1,7 @@
 """Structured JSONL logging for run reconstruction.
 
 Every event is a single JSON line with at least: timestamp, event, and contextual fields.
-Each run gets its own directory under .kodo/runs/<run_id>/.
+Each run gets its own directory under ~/.kodo/runs/<run_id>/.
 """
 
 from __future__ import annotations
@@ -26,9 +26,14 @@ _lock = threading.Lock()
 # ---------------------------------------------------------------------------
 
 
+def _runs_root() -> Path:
+    """Central run storage directory: ~/.kodo/runs/."""
+    return Path.home() / ".kodo" / "runs"
+
+
 @dataclass
 class RunDir:
-    """Path accessor for a single run's folder under .kodo/runs/<run_id>/."""
+    """Path accessor for a single run's folder under ~/.kodo/runs/<run_id>/."""
 
     project_dir: Path
     run_id: str
@@ -47,7 +52,7 @@ class RunDir:
 
     @property
     def root(self) -> Path:
-        return self.project_dir / ".kodo" / "runs" / self.run_id
+        return _runs_root() / self.run_id
 
     @property
     def log_file(self) -> Path:
@@ -71,10 +76,8 @@ class RunDir:
 
 
 def _extract_run_id(log_file: Path) -> str:
-    """Extract run_id from a log file path. Handles both old and new layouts."""
-    if log_file.name == "run.jsonl":
-        return log_file.parent.name  # .kodo/runs/<run_id>/run.jsonl
-    return log_file.stem  # .kodo/logs/<run_id>.jsonl
+    """Extract run_id from a log file path (~/.kodo/runs/<run_id>/run.jsonl)."""
+    return log_file.parent.name
 
 
 # ---------------------------------------------------------------------------
@@ -435,15 +438,12 @@ def parse_run(log_file: Path) -> RunState | None:
 
 
 def find_incomplete_runs(project_dir: Path) -> list[RunState]:
-    """Scan for incomplete runs, newest first.
+    """Scan ~/.kodo/runs/ for incomplete runs belonging to *project_dir*, newest first.
 
-    Checks both new (.kodo/runs/*/run.jsonl) and legacy (.kodo/logs/*.jsonl) layouts.
     An incomplete run has a run_start + at least 1 cycle_end but no run_end.
     """
     candidates: list[Path] = []
-
-    # New layout: .kodo/runs/*/run.jsonl
-    runs_dir = project_dir / ".kodo" / "runs"
+    runs_dir = _runs_root()
     if runs_dir.exists():
         for d in sorted(runs_dir.iterdir(), reverse=True):
             if d.is_dir():
@@ -451,16 +451,13 @@ def find_incomplete_runs(project_dir: Path) -> list[RunState]:
                 if f.exists():
                     candidates.append(f)
 
-    # Legacy layout: .kodo/logs/*.jsonl
-    log_dir = project_dir / ".kodo" / "logs"
-    if log_dir.exists():
-        for f in sorted(log_dir.glob("*.jsonl"), reverse=True):
-            candidates.append(f)
-
+    resolved = str(project_dir.resolve())
     runs: list[RunState] = []
     for f in candidates:
         state = parse_run(f)
         if state is None:
+            continue
+        if state.project_dir != resolved:
             continue
         if not state.finished and state.completed_cycles >= 1:
             runs.append(state)

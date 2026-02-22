@@ -215,7 +215,7 @@ class TestRunIntakeNoninteractive:
             project,
             write_file={
                 "on_query": 0,
-                "path": ".kodo/runs/test/goal-plan.json",
+                "path": str(run_dir.goal_plan_file),
                 "content": plan_json,
             },
         )
@@ -252,7 +252,7 @@ class TestRunIntakeNoninteractive:
             project,
             write_file={
                 "on_query": 1,
-                "path": ".kodo/runs/test/goal-plan.json",
+                "path": str(run_dir.goal_plan_file),
                 "content": plan_json,
             },
         )
@@ -390,9 +390,7 @@ class TestNonInteractiveEndToEnd:
             _main_inner()
 
     def test_uses_existing_goal_plan(self, project):
-        """If goal-plan.json exists, non-interactive mode uses it without intake."""
-        kodo_dir = project / ".kodo"
-        kodo_dir.mkdir()
+        """If goal-plan.json exists in the run dir, non-interactive mode uses it."""
         plan = {
             "context": "Test",
             "stages": [
@@ -405,11 +403,19 @@ class TestNonInteractiveEndToEnd:
                 }
             ],
         }
-        (kodo_dir / "goal-plan.json").write_text(json.dumps(plan))
+
+        # Patch RunDir.create so we can pre-populate the goal plan file
+        original_create = RunDir.create
+
+        def create_with_plan(project_dir, run_id=None):
+            rd = original_create(project_dir, run_id)
+            rd.goal_plan_file.write_text(json.dumps(plan))
+            return rd
 
         with (
             patch("kodo.cli.launch_run") as mock_launch,
             patch("kodo.cli.run_intake_noninteractive") as mock_intake,
+            patch("kodo.cli.RunDir.create", side_effect=create_with_plan),
         ):
             sys.argv = ["kodo", "--goal", "Build X", str(project)]
             _main_inner()

@@ -165,97 +165,71 @@ def test_parse_run_corrupt_lines_tolerated(tmp_path: Path):
 
 
 def test_find_incomplete_runs_newest_first(tmp_path: Path):
-    log_dir = tmp_path / ".kodo" / "logs"
-    log_dir.mkdir(parents=True)
+    runs_dir = log._runs_root()
+
+    def _make_run(run_id: str, events: list[dict]) -> None:
+        d = runs_dir / run_id
+        d.mkdir(parents=True)
+        _write_events(d / "run.jsonl", events)
+
+    project = tmp_path / "myproject"
+    project.mkdir()
 
     # Completed run — should not appear
-    _write_events(
-        log_dir / "run_complete.jsonl",
-        [
-            {
-                "event": "run_start",
-                "goal": "g",
-                "orchestrator": "api",
-                "model": "m",
-                "project_dir": str(tmp_path),
-                "max_exchanges": 30,
-                "max_cycles": 5,
-                "team": [],
-            },
-            _CLI_ARGS,
-            {"event": "cycle_end", "summary": "done"},
-            {"event": "run_end"},
-        ],
-    )
+    _make_run("run_complete", [
+        {
+            "event": "run_start", "goal": "g", "orchestrator": "api",
+            "model": "m", "project_dir": str(project),
+            "max_exchanges": 30, "max_cycles": 5, "team": [],
+        },
+        _CLI_ARGS,
+        {"event": "cycle_end", "summary": "done"},
+        {"event": "run_end"},
+    ])
 
     # Incomplete with 0 cycles — should not appear (no cycle_end)
-    _write_events(
-        log_dir / "run_nocycles.jsonl",
-        [
-            {
-                "event": "run_start",
-                "goal": "g",
-                "orchestrator": "api",
-                "model": "m",
-                "project_dir": str(tmp_path),
-                "max_exchanges": 30,
-                "max_cycles": 5,
-                "team": [],
-            },
-            _CLI_ARGS,
-        ],
-    )
+    _make_run("run_nocycles", [
+        {
+            "event": "run_start", "goal": "g", "orchestrator": "api",
+            "model": "m", "project_dir": str(project),
+            "max_exchanges": 30, "max_cycles": 5, "team": [],
+        },
+        _CLI_ARGS,
+    ])
 
     # Two incomplete runs with cycles
-    _write_events(
-        log_dir / "aaa_older.jsonl",
-        [
-            {
-                "event": "run_start",
-                "goal": "g1",
-                "orchestrator": "api",
-                "model": "m",
-                "project_dir": str(tmp_path),
-                "max_exchanges": 30,
-                "max_cycles": 5,
-                "team": [],
-            },
-            _CLI_ARGS,
-            {"event": "cycle_end", "summary": "older"},
-        ],
-    )
-    _write_events(
-        log_dir / "zzz_newer.jsonl",
-        [
-            {
-                "event": "run_start",
-                "goal": "g2",
-                "orchestrator": "api",
-                "model": "m",
-                "project_dir": str(tmp_path),
-                "max_exchanges": 30,
-                "max_cycles": 5,
-                "team": [],
-            },
-            _CLI_ARGS,
-            {"event": "cycle_end", "summary": "newer"},
-        ],
-    )
+    _make_run("aaa_older", [
+        {
+            "event": "run_start", "goal": "g1", "orchestrator": "api",
+            "model": "m", "project_dir": str(project),
+            "max_exchanges": 30, "max_cycles": 5, "team": [],
+        },
+        _CLI_ARGS,
+        {"event": "cycle_end", "summary": "older"},
+    ])
+    _make_run("zzz_newer", [
+        {
+            "event": "run_start", "goal": "g2", "orchestrator": "api",
+            "model": "m", "project_dir": str(project),
+            "max_exchanges": 30, "max_cycles": 5, "team": [],
+        },
+        _CLI_ARGS,
+        {"event": "cycle_end", "summary": "newer"},
+    ])
 
-    runs = log.find_incomplete_runs(tmp_path)
+    runs = log.find_incomplete_runs(project)
     assert len(runs) == 2
-    # Sorted by filename descending: zzz before aaa
+    # Sorted by directory name descending: zzz before aaa
     assert runs[0].run_id == "zzz_newer"
     assert runs[1].run_id == "aaa_older"
 
 
 def test_init_append_preserves_existing(tmp_path: Path):
-    log_dir = tmp_path / ".kodo" / "logs"
-    log_dir.mkdir(parents=True)
-    f = log_dir / "test_run.jsonl"
+    run_dir = log._runs_root() / "test_run"
+    run_dir.mkdir(parents=True)
+    f = run_dir / "run.jsonl"
     f.write_text('{"event":"run_start"}\n')
 
-    # init_append needs _start_time to be set for emit() to work
     result = log.init_append(f)
     assert result == f
 

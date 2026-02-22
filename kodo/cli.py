@@ -177,8 +177,7 @@ def run_intake_chat(
     print(f"\nGoal saved to {goal_path}")
 
     output_file = run_dir.goal_plan_file if staged else run_dir.goal_refined_file
-    output_rel = str(output_file.relative_to(run_dir.project_dir))
-    prompt = _build_intake_prompt(output_rel, staged)
+    prompt = _build_intake_prompt(str(output_file), staged)
     model = "opus" if backend == "claude" else "composer-1.5"
     session = make_session(backend, model, budget=None, system_prompt=prompt)
 
@@ -290,10 +289,7 @@ def _load_goal_plan(run_dir: RunDir) -> GoalPlan | None:
     """Load an existing goal-plan.json from the run directory."""
     plan_path = run_dir.goal_plan_file
     if not plan_path.exists():
-        # Legacy fallback: check .kodo/goal-plan.json
-        plan_path = run_dir.project_dir / ".kodo" / "goal-plan.json"
-        if not plan_path.exists():
-            return None
+        return None
     try:
         raw = json.loads(plan_path.read_text())
     except json.JSONDecodeError:
@@ -839,8 +835,7 @@ def run_intake_noninteractive(
         return None
 
     output_file = run_dir.goal_plan_file
-    output_rel = str(output_file.relative_to(run_dir.project_dir))
-    prompt = _build_intake_prompt(output_rel, staged=True) + (
+    prompt = _build_intake_prompt(str(output_file), staged=True) + (
         "\n\nIMPORTANT: This is a non-interactive session. "
         "Do NOT ask clarifying questions. Analyze the project and goal, "
         "make reasonable assumptions, and write the goal-plan.json file immediately."
@@ -980,13 +975,9 @@ def _main_inner() -> None:
                 _fail("No incomplete runs found.")
             state = runs[0]
         else:
-            # Check new layout first, then legacy
-            run_log = project_dir / ".kodo" / "runs" / args.resume / "run.jsonl"
-            legacy_log = project_dir / ".kodo" / "logs" / f"{args.resume}.jsonl"
+            run_log = Path.home() / ".kodo" / "runs" / args.resume / "run.jsonl"
             if run_log.exists():
                 log_file = run_log
-            elif legacy_log.exists():
-                log_file = legacy_log
             else:
                 _fail(f"Run not found: {args.resume}")
             state = log.parse_run(log_file)
@@ -1068,38 +1059,13 @@ def _main_inner() -> None:
             use_plan = input("Use this goal plan? [Y/n] ").strip().lower()
             if not use_plan or use_plan == "y":
                 plan = existing_plan
-                # Check legacy location for refined goal
-                refined_path = project_dir / ".kodo" / "goal-refined.md"
-                if refined_path.exists():
-                    goal_text = refined_path.read_text().strip() or goal_text
 
         if plan is None:
-            # Check for refined goal from previous runs (legacy location)
-            refined_path = project_dir / ".kodo" / "goal-refined.md"
-            if refined_path.exists():
-                refined = refined_path.read_text().strip()
-                if refined:
-                    print("\nFound refined goal from previous intake:")
-                    print("-" * 40)
-                    print(refined[:500])
-                    if len(refined) > 500:
-                        print("...")
-                    print("-" * 40)
-                    use_refined = input("Use this refined goal? [Y/n] ").strip().lower()
-                    if not use_refined or use_refined == "y":
-                        goal_text = refined
-                    else:
-                        intake_result = _offer_intake(run_dir, goal_text)
-                        if isinstance(intake_result, GoalPlan):
-                            plan = intake_result
-                        elif isinstance(intake_result, str):
-                            goal_text = intake_result
-            else:
-                intake_result = _offer_intake(run_dir, goal_text)
-                if isinstance(intake_result, GoalPlan):
-                    plan = intake_result
-                elif isinstance(intake_result, str):
-                    goal_text = intake_result
+            intake_result = _offer_intake(run_dir, goal_text)
+            if isinstance(intake_result, GoalPlan):
+                plan = intake_result
+            elif isinstance(intake_result, str):
+                goal_text = intake_result
 
     # 5. Summary and confirm
     if not args.json:

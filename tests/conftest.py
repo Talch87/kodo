@@ -13,10 +13,15 @@ from kodo.sessions.base import QueryResult, SessionStats
 
 
 @pytest.fixture(autouse=True)
-def _isolate_log():
-    """Save and restore log module state to prevent cross-test pollution."""
+def _isolate_log(tmp_path: Path):
+    """Save and restore log module state; redirect ~/.kodo/runs to tmp dir."""
     saved = (log._log_file, log._run_id, log._start_time)
+    runs_tmp = tmp_path / "kodo_runs"
+    runs_tmp.mkdir()
+    original_runs_root = log._runs_root
+    log._runs_root = lambda: runs_tmp  # type: ignore[assignment]
     yield
+    log._runs_root = original_runs_root  # type: ignore[assignment]
     log._log_file, log._run_id, log._start_time = saved
 
 
@@ -82,7 +87,8 @@ def make_scripted_session(
             idx = min(call_count, len(resps) - 1)
             call_count += 1
             if write_file and call_count - 1 == write_file["on_query"]:
-                path = project_dir / write_file["path"]
+                p = Path(write_file["path"])
+                path = p if p.is_absolute() else project_dir / p
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(write_file["content"])
             self._response_text = resps[idx]

@@ -10,9 +10,10 @@ from kodo.log import RunDir
 
 
 def test_init_creates_log_file(tmp_path: Path):
-    log_file = log.init(RunDir.create(tmp_path, "test_run"))
+    run_dir = RunDir.create(tmp_path, "test_run")
+    log_file = log.init(run_dir)
     assert log_file.exists()
-    assert log_file.parent == tmp_path / ".kodo" / "runs" / "test_run"
+    assert log_file.parent == run_dir.root
     assert log_file.name == "run.jsonl"
 
 

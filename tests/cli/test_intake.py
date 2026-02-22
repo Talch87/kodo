@@ -93,7 +93,7 @@ class TestIntakeInterviewLoop:
             # Agent eagerly writes the plan on the very first query
             write_file={
                 "on_query": 0,
-                "path": ".kodo/runs/test/goal-plan.json",
+                "path": str(run_dir.goal_plan_file),
                 "content": json.dumps(
                     {
                         "context": "Rust game",
@@ -138,7 +138,7 @@ class TestIntakeOutputFile:
             project_dir=project,
             write_file={
                 "on_query": 2,
-                "path": ".kodo/runs/test/goal-refined.md",
+                "path": str(run_dir.goal_refined_file),
                 "content": "Refined goal text",
             },
         )
@@ -177,7 +177,7 @@ class TestIntakeOutputFile:
             project_dir=project,
             write_file={
                 "on_query": 1,
-                "path": ".kodo/runs/test/goal-plan.json",
+                "path": str(run_dir.goal_plan_file),
                 "content": plan_json,
             },
         )
