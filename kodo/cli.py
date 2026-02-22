@@ -493,6 +493,7 @@ def launch_run(
     params: dict,
     plan: GoalPlan | None = None,
     json_mode: bool = False,
+    auto_refine: bool = False,
 ):
     """Build team + orchestrator and run. Returns the RunResult."""
     # Snapshot config and goal into the run directory
@@ -552,6 +553,7 @@ def launch_run(
         max_cycles=max_cycles,
         plan=plan,
         verifiers=verifiers,
+        auto_refine=auto_refine,
     )
 
     if not json_mode:
@@ -957,6 +959,13 @@ def _main_inner() -> None:
         help="Skip intake interview, use goal as-is",
     )
     parser.add_argument(
+        "--auto-refine",
+        action="store_true",
+        default=False,
+        help="Auto-refine goal before implementation (surfaces implicit constraints). "
+        "Useful for unattended/overnight runs when no human is available for intake.",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         default=False,
@@ -1013,7 +1022,7 @@ def _main_inner() -> None:
                 _fail("No incomplete runs found.")
             state = runs[0]
         else:
-            run_log = Path.home() / ".kodo" / "runs" / args.resume / "run.jsonl"
+            run_log = log._runs_root() / args.resume / "run.jsonl"
             if run_log.exists():
                 log_file = run_log
             else:
@@ -1139,7 +1148,10 @@ def _main_inner() -> None:
             sys.exit(0)
 
     # 6. Launch
-    result = launch_run(run_dir, goal_text, params, plan=plan, json_mode=args.json)
+    result = launch_run(
+        run_dir, goal_text, params, plan=plan, json_mode=args.json,
+        auto_refine=args.auto_refine,
+    )
     _emit_json_and_exit(args, result)
 
 

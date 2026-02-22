@@ -465,27 +465,11 @@ def find_incomplete_runs(project_dir: Path) -> list[RunState]:
 
     An incomplete run has a run_start + at least 1 cycle_end but no run_end.
     """
-    candidates: list[Path] = []
-    runs_dir = _runs_root()
-    if runs_dir.exists():
-        for d in sorted(runs_dir.iterdir(), reverse=True):
-            if d.is_dir():
-                f = d / "run.jsonl"
-                if f.exists():
-                    candidates.append(f)
-
-    resolved = str(project_dir.resolve())
-    runs: list[RunState] = []
-    for f in candidates:
-        state = parse_run(f)
-        if state is None:
-            continue
-        if state.project_dir != resolved:
-            continue
-        if not state.finished and state.completed_cycles >= 1:
-            runs.append(state)
-
-    return runs
+    return [
+        r
+        for r in list_runs(project_dir)
+        if not r.finished and r.completed_cycles >= 1
+    ]
 
 
 def init_append(log_file: Path) -> Path:
