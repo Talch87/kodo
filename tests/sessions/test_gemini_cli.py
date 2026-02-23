@@ -25,7 +25,7 @@ def test_query_returns_result(tmp_path: Path):
     session = GeminiCliSession(model="gemini-2.5-flash")
 
     with patch(
-        "kodo.sessions.gemini_cli.subprocess.Popen",
+        "kodo.sessions.base.subprocess.Popen",
         _make_popen_factory(result_text="All done!"),
     ):
         result = session.query("do stuff", tmp_path, max_turns=10)
@@ -40,7 +40,7 @@ def test_resume_on_subsequent_queries(tmp_path: Path):
     session = GeminiCliSession(model="gemini-2.5-flash")
 
     with patch(
-        "kodo.sessions.gemini_cli.subprocess.Popen",
+        "kodo.sessions.base.subprocess.Popen",
         _make_popen_factory(result_text="ok"),
     ):
         session.query("first", tmp_path, max_turns=10)
@@ -55,7 +55,7 @@ def test_resume_on_subsequent_queries(tmp_path: Path):
         calls.append(cmd)
         return original_factory(cmd, **kwargs)
 
-    with patch("kodo.sessions.gemini_cli.subprocess.Popen", capturing_factory):
+    with patch("kodo.sessions.base.subprocess.Popen", capturing_factory):
         session.query("second", tmp_path, max_turns=10)
 
     assert "--resume" in calls[0]
@@ -71,7 +71,7 @@ def test_system_prompt_prepended_once(tmp_path: Path):
         calls.append(cmd)
         return MockGeminiCliProcess(cmd, result_text="ok", **kwargs)
 
-    with patch("kodo.sessions.gemini_cli.subprocess.Popen", capturing_factory):
+    with patch("kodo.sessions.base.subprocess.Popen", capturing_factory):
         session.query("task1", tmp_path, max_turns=10)
         session.query("task2", tmp_path, max_turns=10)
 
@@ -90,7 +90,7 @@ def test_error_on_nonzero_returncode(tmp_path: Path):
     session = GeminiCliSession(model="gemini-2.5-flash")
 
     with patch(
-        "kodo.sessions.gemini_cli.subprocess.Popen",
+        "kodo.sessions.base.subprocess.Popen",
         _make_popen_factory(result_text="", returncode=1, stderr_text="fatal error\n"),
     ):
         result = session.query("fail", tmp_path, max_turns=10)
@@ -105,7 +105,7 @@ def test_reset_starts_fresh_session(tmp_path: Path):
     session = GeminiCliSession(model="gemini-2.5-flash")
 
     with patch(
-        "kodo.sessions.gemini_cli.subprocess.Popen",
+        "kodo.sessions.base.subprocess.Popen",
         _make_popen_factory(result_text="ok"),
     ):
         session.query("task", tmp_path, max_turns=10)
@@ -125,7 +125,7 @@ def test_reset_starts_fresh_session(tmp_path: Path):
         calls.append(cmd)
         return original_factory(cmd, **kwargs)
 
-    with patch("kodo.sessions.gemini_cli.subprocess.Popen", capturing_factory):
+    with patch("kodo.sessions.base.subprocess.Popen", capturing_factory):
         session.query("new task", tmp_path, max_turns=10)
 
     assert "--resume" not in calls[0]
@@ -136,7 +136,7 @@ def test_tokens_extracted(tmp_path: Path):
     session = GeminiCliSession(model="gemini-2.5-flash")
 
     with patch(
-        "kodo.sessions.gemini_cli.subprocess.Popen",
+        "kodo.sessions.base.subprocess.Popen",
         _make_popen_factory(
             result_text="done",
             input_tokens=500,
@@ -162,7 +162,7 @@ def test_cwd_set_to_project_dir(tmp_path: Path):
         kwargs_captured.append(kwargs)
         return MockGeminiCliProcess(cmd, result_text="ok", **kwargs)
 
-    with patch("kodo.sessions.gemini_cli.subprocess.Popen", capturing_factory):
+    with patch("kodo.sessions.base.subprocess.Popen", capturing_factory):
         session.query("task", tmp_path, max_turns=10)
 
     assert kwargs_captured[0]["cwd"] == str(tmp_path)

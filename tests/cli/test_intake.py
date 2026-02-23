@@ -8,8 +8,8 @@ from unittest.mock import patch
 
 import pytest
 
-from tests.conftest import make_scripted_session
-from kodo.cli import run_intake_chat
+from tests.conftest import FakeSession, make_scripted_session
+from kodo.cli import run_intake_auto, run_intake_chat
 from kodo.log import RunDir
 
 
@@ -248,3 +248,50 @@ class TestIntakeEdgeCases:
             run_intake_chat("claude", run_dir, "My goal", staged=False)
 
         assert session.stats.queries == 2
+
+
+class TestAutoRefine:
+    """Tests for run_intake_auto — automated goal refinement."""
+
+    def test_returns_file_content_when_session_writes_file(self, project):
+        """If the session writes goal-refined.md, return its content."""
+        run_dir = RunDir.create(project, "test_auto")
+        session = make_scripted_session(
+            responses=["Analysis: looks good"],
+            project_dir=project,
+            write_file={
+                "on_query": 0,
+                "path": str(run_dir.goal_refined_file),
+                "content": "Refined: build a REST API with auth",
+            },
+        )
+
+        with patch("kodo.cli.make_session", return_value=session):
+            result = run_intake_auto("claude", run_dir, "Build an API")
+
+        assert result == "Refined: build a REST API with auth"
+        assert session.stats.queries == 1
+
+    def test_falls_back_to_response_text_when_no_file(self, project):
+        """If session doesn't write a file, wrap its response as refinement."""
+        run_dir = RunDir.create(project, "test_auto_fallback")
+        session = FakeSession(response_text="Implicit: needs pagination and rate limiting")
+
+        with patch("kodo.cli.make_session", return_value=session):
+            result = run_intake_auto("claude", run_dir, "Build an API")
+
+        assert result is not None
+        assert "Build an API" in result
+        assert "Implicit: needs pagination and rate limiting" in result
+        # Fallback should also persist to disk
+        assert run_dir.goal_refined_file.exists()
+
+    def test_returns_none_on_empty_response(self, project):
+        """If session returns empty text and no file, return None."""
+        run_dir = RunDir.create(project, "test_auto_empty")
+        session = FakeSession(response_text="")
+
+        with patch("kodo.cli.make_session", return_value=session):
+            result = run_intake_auto("claude", run_dir, "Build an API")
+
+        assert result is None

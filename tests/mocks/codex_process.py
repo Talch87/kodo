@@ -12,6 +12,9 @@ class MockCodexProcess:
 
     Produces JSONL events on stdout matching the Codex CLI --json format:
     thread.started, item.completed (assistant message), turn.completed (usage).
+
+    Use error_message to simulate bad-model or auth errors (emits error event,
+    clears result_text so CodexSession surfaces the formatted error).
     """
 
     def __init__(
@@ -25,16 +28,21 @@ class MockCodexProcess:
         output_tokens: int = 50,
         extra_messages: list[dict[str, Any]] | None = None,
         stderr_text: str = "",
+        error_message: str | None = None,
         **kwargs: Any,
     ):
         self.cmd = cmd
         self.returncode = returncode
+        msgs = list(extra_messages or [])
+        if error_message:
+            msgs.append({"type": "error", "message": error_message})
+            result_text = ""
         self._build_stdout(
             result_text,
             session_id,
             input_tokens,
             output_tokens,
-            extra_messages or [],
+            msgs,
         )
         self.stderr = io.StringIO(stderr_text)
         self.pid = 12345

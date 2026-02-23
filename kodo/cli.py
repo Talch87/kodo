@@ -1199,7 +1199,7 @@ def _main_inner() -> None:
             if not use_plan or use_plan == "y":
                 plan = existing_plan
 
-        if plan is None:
+        if plan is None and not args.skip_intake:
             if args.auto_refine:
                 backend = "claude" if has_claude() else "cursor"
                 refined = run_intake_auto(backend, run_dir, goal_text)

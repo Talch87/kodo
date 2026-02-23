@@ -25,7 +25,7 @@ def test_query_returns_result(tmp_path: Path):
     session = CodexSession(model="o4-mini")
 
     with patch(
-        "kodo.sessions.codex.subprocess.Popen",
+        "kodo.sessions.base.subprocess.Popen",
         _make_popen_factory(result_text="All done!", session_id="t1"),
     ):
         result = session.query("do stuff", tmp_path, max_turns=10)
@@ -40,7 +40,7 @@ def test_session_id_captured_for_resume(tmp_path: Path):
     session = CodexSession(model="o4-mini")
 
     with patch(
-        "kodo.sessions.codex.subprocess.Popen",
+        "kodo.sessions.base.subprocess.Popen",
         _make_popen_factory(result_text="ok", session_id="thread-xyz"),
     ):
         session.query("first", tmp_path, max_turns=10)
@@ -55,7 +55,7 @@ def test_session_id_captured_for_resume(tmp_path: Path):
         calls.append(cmd)
         return original_factory(cmd, **kwargs)
 
-    with patch("kodo.sessions.codex.subprocess.Popen", capturing_factory):
+    with patch("kodo.sessions.base.subprocess.Popen", capturing_factory):
         session.query("second", tmp_path, max_turns=10)
 
     assert "resume" in calls[0]
@@ -72,7 +72,7 @@ def test_system_prompt_prepended_once(tmp_path: Path):
         calls.append(cmd)
         return MockCodexProcess(cmd, result_text="ok", session_id="t1", **kwargs)
 
-    with patch("kodo.sessions.codex.subprocess.Popen", capturing_factory):
+    with patch("kodo.sessions.base.subprocess.Popen", capturing_factory):
         session.query("task1", tmp_path, max_turns=10)
         session.query("task2", tmp_path, max_turns=10)
 
@@ -88,7 +88,7 @@ def test_error_on_nonzero_returncode(tmp_path: Path):
     session = CodexSession(model="o4-mini")
 
     with patch(
-        "kodo.sessions.codex.subprocess.Popen",
+        "kodo.sessions.base.subprocess.Popen",
         _make_popen_factory(
             result_text="", session_id="t1", returncode=1, stderr_text="fatal error\n"
         ),
@@ -104,7 +104,7 @@ def test_reset_starts_fresh_session(tmp_path: Path):
     session = CodexSession(model="o4-mini")
 
     with patch(
-        "kodo.sessions.codex.subprocess.Popen",
+        "kodo.sessions.base.subprocess.Popen",
         _make_popen_factory(result_text="ok", session_id="t1"),
     ):
         session.query("task", tmp_path, max_turns=10)
@@ -123,7 +123,7 @@ def test_reset_starts_fresh_session(tmp_path: Path):
         calls.append(cmd)
         return original_factory(cmd, **kwargs)
 
-    with patch("kodo.sessions.codex.subprocess.Popen", capturing_factory):
+    with patch("kodo.sessions.base.subprocess.Popen", capturing_factory):
         session.query("new task", tmp_path, max_turns=10)
 
     assert "resume" not in calls[0]
@@ -134,7 +134,7 @@ def test_tokens_extracted(tmp_path: Path):
     session = CodexSession(model="o4-mini")
 
     with patch(
-        "kodo.sessions.codex.subprocess.Popen",
+        "kodo.sessions.base.subprocess.Popen",
         _make_popen_factory(
             result_text="done",
             session_id="t1",
@@ -148,3 +148,19 @@ def test_tokens_extracted(tmp_path: Path):
     assert result.output_tokens == 200
     assert session.stats.total_input_tokens == 500
     assert session.stats.total_output_tokens == 200
+
+
+def test_bad_model_returns_error(tmp_path: Path):
+    """Unit-test version of live TestCodexSession.test_bad_model_returns_error."""
+    log.init(RunDir.create(tmp_path, "codex_bad_model"))
+    session = CodexSession(model="nonexistent-model-xyz")
+
+    with patch(
+        "kodo.sessions.base.subprocess.Popen",
+        _make_popen_factory(error_message="model does not exist"),
+    ):
+        result = session.query("do stuff", tmp_path, max_turns=5)
+
+    assert result.is_error is True
+    assert result.text
+    assert "not supported" in result.text or "does not exist" in result.text

@@ -3,31 +3,24 @@
 from __future__ import annotations
 
 import json
-import subprocess
-import threading
 import time
 from pathlib import Path
 
 from kodo import log
-from kodo.sessions.base import QueryResult, SessionStats
+from kodo.sessions.base import QueryResult, SubprocessSession
 
 
-class CursorSession:
+class CursorSession(SubprocessSession):
+    _session_label = "cursor"
+
     def __init__(
         self,
         model: str = "composer-1.5",
         system_prompt: str | None = None,
         resume_chat_id: str | None = None,
     ):
-        self.model = model
-        self.system_prompt = system_prompt
-        self._stats = SessionStats()
+        super().__init__(model, system_prompt)
         self._chat_id: str | None = resume_chat_id
-        self._system_prompt_sent = False
-
-    @property
-    def stats(self) -> SessionStats:
-        return self._stats
 
     @property
     def cost_bucket(self) -> str:
@@ -46,14 +39,10 @@ class CursorSession:
             queries_before=self._stats.queries,
         )
         self._chat_id = None
-        self._stats = SessionStats()
-        self._system_prompt_sent = False
+        super().reset()
 
     def query(self, prompt: str, project_dir: Path, *, max_turns: int) -> QueryResult:
-        # Cursor has no native system prompt — prepend to first query per session
-        if self.system_prompt and not self._system_prompt_sent:
-            prompt = f"{self.system_prompt}\n\n{prompt}"
-            self._system_prompt_sent = True
+        prompt = self._prepend_system_prompt(prompt)
 
         cmd = [
             "cursor-agent",
@@ -83,23 +72,9 @@ class CursorSession:
 
         t0 = time.monotonic()
         result_text = ""
-        duration_ms = 0
         raw_messages: list[dict] = []
 
-        proc = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-        )
-
-        # Drain stderr in a background thread to avoid deadlock when the
-        # OS pipe buffer fills up while we're reading stdout.
-        stderr_chunks: list[str] = []
-
-        def _drain_stderr():
-            for line in proc.stderr:
-                stderr_chunks.append(line)
-
-        stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
-        stderr_thread.start()
+        proc, stderr_chunks, stderr_thread = self._spawn(cmd)
 
         for line in proc.stdout:
             line = line.strip()
@@ -114,7 +89,6 @@ class CursorSession:
 
             if msg.get("type") == "result":
                 result_text = msg.get("result", "")
-                duration_ms = msg.get("duration_ms", 0)
             # Capture chat ID from any message that reports it
             if "chatId" in msg:
                 self._chat_id = msg["chatId"]
@@ -123,12 +97,12 @@ class CursorSession:
             elif "session_id" in msg:
                 self._chat_id = msg["session_id"]
 
-        proc.wait()
-        stderr_thread.join(timeout=5)
+        stderr_text = self._wait(proc, stderr_chunks, stderr_thread)
         elapsed = time.monotonic() - t0
 
         is_error = proc.returncode != 0
-        stderr_text = "".join(stderr_chunks) if is_error else ""
+        if not is_error:
+            stderr_text = ""
 
         self._stats.queries += 1
 

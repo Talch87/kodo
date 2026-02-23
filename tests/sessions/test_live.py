@@ -4,6 +4,8 @@ These tests call real backends — they require local auth (CLI tools on PATH
 and valid credentials).  Skip automatically when a backend is unavailable.
 
 Run with:  uv run pytest tests/sessions/test_live.py -m live -v
+
+Unit-test versions (mocked, no real backends): tests/sessions/test_live_unit.py
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 """kodo — autonomous goal-driven coding agent."""
 
-__version__ = "0.4.28"
+__version__ = "0.4.29"
 
 from kodo import log
 from kodo.agent import Agent, AgentResult

@@ -29,7 +29,7 @@ def test_no_result_message_returns_empty_text(tmp_path: Path):
         proc.stdout = io.StringIO("\n".join(messages) + "\n")
         return proc
 
-    with patch("kodo.sessions.cursor.subprocess.Popen", factory):
+    with patch("kodo.sessions.base.subprocess.Popen", factory):
         result = session.query("do something", tmp_path, max_turns=10)
 
     assert result.text == ""
@@ -48,7 +48,7 @@ def test_empty_stdout_no_crash(tmp_path: Path):
         proc.stdout = io.StringIO("")
         return proc
 
-    with patch("kodo.sessions.cursor.subprocess.Popen", factory):
+    with patch("kodo.sessions.base.subprocess.Popen", factory):
         result = session.query("do something", tmp_path, max_turns=10)
 
     assert result.text == ""
@@ -72,7 +72,7 @@ def test_chat_id_from_alternate_keys(tmp_path: Path):
             proc.stdout = io.StringIO("\n".join(messages) + "\n")
             return proc
 
-        with patch("kodo.sessions.cursor.subprocess.Popen", factory):
+        with patch("kodo.sessions.base.subprocess.Popen", factory):
             session.query("q", tmp_path, max_turns=10)
 
         assert session.session_id == f"id-{key}"
@@ -89,7 +89,7 @@ def test_system_prompt_resent_after_reset(tmp_path: Path):
         calls.append(cmd)
         return MockCursorProcess(cmd, result_text="ok", chat_id="c1", **kwargs)
 
-    with patch("kodo.sessions.cursor.subprocess.Popen", factory):
+    with patch("kodo.sessions.base.subprocess.Popen", factory):
         session.query("first", tmp_path, max_turns=10)
         session.reset()
         session.query("second", tmp_path, max_turns=10)
@@ -108,7 +108,7 @@ def test_large_result_text_not_truncated(tmp_path: Path):
     def factory(cmd, **kwargs):
         return MockCursorProcess(cmd, result_text=big_text, chat_id="c1", **kwargs)
 
-    with patch("kodo.sessions.cursor.subprocess.Popen", factory):
+    with patch("kodo.sessions.base.subprocess.Popen", factory):
         result = session.query("q", tmp_path, max_turns=10)
 
     assert len(result.text) == 100_000
@@ -124,7 +124,7 @@ def test_workspace_flag_matches_project_dir(tmp_path: Path):
         calls.append(cmd)
         return MockCursorProcess(cmd, result_text="ok", chat_id="c1", **kwargs)
 
-    with patch("kodo.sessions.cursor.subprocess.Popen", factory):
+    with patch("kodo.sessions.base.subprocess.Popen", factory):
         session.query("q", tmp_path, max_turns=10)
 
     cmd = calls[0]

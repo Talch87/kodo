@@ -3,34 +3,27 @@
 from __future__ import annotations
 
 import json
-import subprocess
-import threading
 import time
 from pathlib import Path
 
 from kodo import log
-from kodo.sessions.base import QueryResult, SessionStats
+from kodo.sessions.base import QueryResult, SubprocessSession
 
 
-class GeminiCliSession:
+class GeminiCliSession(SubprocessSession):
+    _session_label = "gemini-cli"
+
     def __init__(
         self,
         model: str = "gemini-2.5-flash",
         system_prompt: str | None = None,
         resume_session: bool = False,
     ):
-        self.model = model
-        self.system_prompt = system_prompt
-        self._stats = SessionStats()
-        self._system_prompt_sent = False
+        super().__init__(model, system_prompt)
         self._resume_next = resume_session
         # Gemini CLI auto-saves sessions; --resume loads the last one.
         # We track whether to pass --resume on the next query.
         self._has_queried = False
-
-    @property
-    def stats(self) -> SessionStats:
-        return self._stats
 
     @property
     def cost_bucket(self) -> str:
@@ -48,16 +41,12 @@ class GeminiCliSession:
             model=self.model,
             queries_before=self._stats.queries,
         )
-        self._stats = SessionStats()
-        self._system_prompt_sent = False
         self._resume_next = False
         self._has_queried = False
+        super().reset()
 
     def query(self, prompt: str, project_dir: Path, *, max_turns: int) -> QueryResult:
-        # Gemini CLI has no native system prompt flag — prepend to first query
-        if self.system_prompt and not self._system_prompt_sent:
-            prompt = f"{self.system_prompt}\n\n{prompt}"
-            self._system_prompt_sent = True
+        prompt = self._prepend_system_prompt(prompt)
 
         cmd = [
             "gemini",
@@ -84,31 +73,13 @@ class GeminiCliSession:
 
         t0 = time.monotonic()
 
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=str(project_dir),
-        )
-
-        # Drain stderr in a background thread to avoid deadlock.
-        stderr_chunks: list[str] = []
-
-        def _drain_stderr():
-            for line in proc.stderr:
-                stderr_chunks.append(line)
-
-        stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
-        stderr_thread.start()
+        proc, stderr_chunks, stderr_thread = self._spawn(cmd, cwd=str(project_dir))
 
         stdout_text = proc.stdout.read()
-        proc.wait()
-        stderr_thread.join(timeout=5)
+        stderr_text = self._wait(proc, stderr_chunks, stderr_thread)
         elapsed = time.monotonic() - t0
 
         is_error = proc.returncode != 0
-        stderr_text = "".join(stderr_chunks)
 
         # Parse the JSON response
         result_text = ""

@@ -25,7 +25,7 @@ def test_query_returns_result(tmp_path: Path):
     session = CursorSession(model="composer-1.5")
 
     with patch(
-        "kodo.sessions.cursor.subprocess.Popen",
+        "kodo.sessions.base.subprocess.Popen",
         _make_popen_factory(result_text="All done!", chat_id="c1"),
     ):
         result = session.query("do stuff", tmp_path, max_turns=10)
@@ -40,7 +40,7 @@ def test_chat_id_captured_for_resume(tmp_path: Path):
     session = CursorSession(model="composer-1.5")
 
     with patch(
-        "kodo.sessions.cursor.subprocess.Popen",
+        "kodo.sessions.base.subprocess.Popen",
         _make_popen_factory(result_text="ok", chat_id="chat-xyz"),
     ):
         session.query("first", tmp_path, max_turns=10)
@@ -53,7 +53,7 @@ def test_chat_id_captured_for_resume(tmp_path: Path):
         calls.append(cmd)
         return original_factory(cmd, **kwargs)
 
-    with patch("kodo.sessions.cursor.subprocess.Popen", capturing_factory):
+    with patch("kodo.sessions.base.subprocess.Popen", capturing_factory):
         session.query("second", tmp_path, max_turns=10)
 
     assert "--resume" in calls[0]
@@ -70,7 +70,7 @@ def test_system_prompt_prepended_once(tmp_path: Path):
         calls.append(cmd)
         return MockCursorProcess(cmd, result_text="ok", chat_id="c1", **kwargs)
 
-    with patch("kodo.sessions.cursor.subprocess.Popen", capturing_factory):
+    with patch("kodo.sessions.base.subprocess.Popen", capturing_factory):
         session.query("task1", tmp_path, max_turns=10)
         session.query("task2", tmp_path, max_turns=10)
 
@@ -85,7 +85,7 @@ def test_error_on_nonzero_returncode(tmp_path: Path):
     session = CursorSession(model="composer-1.5")
 
     with patch(
-        "kodo.sessions.cursor.subprocess.Popen",
+        "kodo.sessions.base.subprocess.Popen",
         _make_popen_factory(
             result_text="", chat_id="c1", returncode=1, stderr_text="fatal error\n"
         ),
@@ -101,7 +101,7 @@ def test_reset_starts_fresh_session(tmp_path: Path):
     session = CursorSession(model="composer-1.5")
 
     with patch(
-        "kodo.sessions.cursor.subprocess.Popen",
+        "kodo.sessions.base.subprocess.Popen",
         _make_popen_factory(result_text="ok", chat_id="c1"),
     ):
         session.query("task", tmp_path, max_turns=10)
@@ -120,7 +120,7 @@ def test_reset_starts_fresh_session(tmp_path: Path):
         calls.append(cmd)
         return original_factory(cmd, **kwargs)
 
-    with patch("kodo.sessions.cursor.subprocess.Popen", capturing_factory):
+    with patch("kodo.sessions.base.subprocess.Popen", capturing_factory):
         session.query("new task", tmp_path, max_turns=10)
 
     assert "--resume" not in calls[0]

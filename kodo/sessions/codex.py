@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import json
-import subprocess
-import threading
 import time
 from pathlib import Path
 
 from kodo import log
-from kodo.sessions.base import QueryResult, SessionStats
+from kodo.sessions.base import QueryResult, SubprocessSession
 
 
-class CodexSession:
+class CodexSession(SubprocessSession):
+    _session_label = "codex"
+
     def __init__(
         self,
         model: str = "gpt-5.2-codex",
@@ -20,16 +20,9 @@ class CodexSession:
         resume_session_id: str | None = None,
         sandbox: str = "workspace-write",
     ):
-        self.model = model
-        self.system_prompt = system_prompt
-        self._stats = SessionStats()
+        super().__init__(model, system_prompt)
         self._session_id: str | None = resume_session_id
-        self._system_prompt_sent = False
         self._sandbox = sandbox
-
-    @property
-    def stats(self) -> SessionStats:
-        return self._stats
 
     @property
     def cost_bucket(self) -> str:
@@ -48,14 +41,10 @@ class CodexSession:
             queries_before=self._stats.queries,
         )
         self._session_id = None
-        self._stats = SessionStats()
-        self._system_prompt_sent = False
+        super().reset()
 
     def query(self, prompt: str, project_dir: Path, *, max_turns: int) -> QueryResult:
-        # Codex has no native system prompt — prepend to first query per session
-        if self.system_prompt and not self._system_prompt_sent:
-            prompt = f"{self.system_prompt}\n\n{prompt}"
-            self._system_prompt_sent = True
+        prompt = self._prepend_system_prompt(prompt)
 
         if self._session_id:
             # Resume an existing session
@@ -100,20 +89,7 @@ class CodexSession:
         raw_messages: list[dict] = []
         error_messages: list[str] = []
 
-        proc = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-        )
-
-        # Drain stderr in a background thread to avoid deadlock when the
-        # OS pipe buffer fills up while we're reading stdout.
-        stderr_chunks: list[str] = []
-
-        def _drain_stderr():
-            for line in proc.stderr:
-                stderr_chunks.append(line)
-
-        stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
-        stderr_thread.start()
+        proc, stderr_chunks, stderr_thread = self._spawn(cmd)
 
         for line in proc.stdout:
             line = line.strip()
@@ -179,12 +155,10 @@ class CodexSession:
                 if "error" in bg_msg.lower() or "status 4" in bg_msg:
                     error_messages.append(bg_msg)
 
-        proc.wait()
-        stderr_thread.join(timeout=5)
+        stderr_text = self._wait(proc, stderr_chunks, stderr_thread)
         elapsed = time.monotonic() - t0
 
         is_error = proc.returncode != 0
-        stderr_text = "".join(stderr_chunks)
 
         # Codex may exit 0 even when all API calls failed — detect this
         if not is_error and not result_text and error_messages:
