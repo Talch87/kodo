@@ -111,10 +111,74 @@ def test_529_fallback(tmp_path: Path):
             model="claude-opus-4-6",
             fallback_model="claude-sonnet-4-5-20250929",
         )
-        result = orch.cycle("build feature", tmp_path, team, max_exchanges=10)
+        orch.cycle("build feature", tmp_path, team, max_exchanges=10)
 
     # Should have retried with fallback and succeeded
     assert call_count[0] == 2
+
+
+def test_build_tools_creates_agent_and_done_tools(tmp_path: Path):
+    """_build_tools creates ask_<name> tools for each agent and a done tool."""
+    from unittest.mock import MagicMock
+
+    from kodo.orchestrators.api import _build_tools
+    from kodo.orchestrators.base import DoneSignal
+
+    team = _make_fake_team()
+    team["tester"] = _make_fake_team()["worker"]  # add a second agent
+
+    done_signal = DoneSignal()
+    summarizer = MagicMock()
+
+    tools = _build_tools(team, tmp_path, summarizer, done_signal, "test goal")
+
+    tool_names = {t.name for t in tools}
+    assert "ask_worker" in tool_names
+    assert "ask_tester" in tool_names
+    assert "done" in tool_names
+    assert len(tools) == 3  # 2 agents + done
+
+
+def test_build_tools_agent_handler_returns_string(tmp_path: Path):
+    """Agent tool handlers return a string result (not raise)."""
+    from unittest.mock import MagicMock
+
+    from kodo.orchestrators.api import _build_tools
+    from kodo.orchestrators.base import DoneSignal
+
+    team = _make_fake_team()
+    done_signal = DoneSignal()
+    summarizer = MagicMock()
+
+    tools = _build_tools(team, tmp_path, summarizer, done_signal, "test goal")
+    ask_worker = next(t for t in tools if t.name == "ask_worker")
+
+    log.init(RunDir.create(tmp_path, "tool_test"))
+    result = ask_worker.function(task="do something")
+    assert isinstance(result, str)
+
+
+def test_build_tools_done_sets_signal(tmp_path: Path):
+    """The done tool handler sets the DoneSignal when verification passes."""
+    from unittest.mock import MagicMock
+
+    from kodo.orchestrators.api import _build_tools
+    from kodo.orchestrators.base import DoneSignal
+
+    team = _make_fake_team()
+    done_signal = DoneSignal()
+    summarizer = MagicMock()
+
+    tools = _build_tools(team, tmp_path, summarizer, done_signal, "test goal")
+    done_tool = next(t for t in tools if t.name == "done")
+
+    log.init(RunDir.create(tmp_path, "done_test"))
+    with patch("kodo.orchestrators.base.verify_done", return_value=None):
+        done_tool.function(summary="all done", success=True)
+
+    assert done_signal.called is True
+    assert done_signal.success is True
+    assert done_signal.summary == "all done"
 
 
 def test_messages_to_text():

@@ -15,14 +15,12 @@ from kodo.sessions.base import QueryResult, SessionStats
 @pytest.fixture(autouse=True)
 def _isolate_log(tmp_path: Path):
     """Save and restore log module state; redirect ~/.kodo/runs to tmp dir."""
-    saved = (log._log_file, log._run_id, log._start_time)
+    saved = log._test_snapshot()
     runs_tmp = tmp_path / "kodo_runs"
     runs_tmp.mkdir()
-    original_runs_root = log._runs_root
-    log._runs_root = lambda: runs_tmp  # type: ignore[assignment]
+    log._test_redirect_runs(runs_tmp)
     yield
-    log._runs_root = original_runs_root  # type: ignore[assignment]
-    log._log_file, log._run_id, log._start_time = saved
+    log._test_restore(saved)
 
 
 class FakeSession:
@@ -33,6 +31,7 @@ class FakeSession:
         self._is_error = is_error
         self._stats = SessionStats()
         self.model = "fake-model"
+        self.prompts: list[str] = []
 
     @property
     def stats(self) -> SessionStats:
@@ -47,6 +46,7 @@ class FakeSession:
         return None
 
     def query(self, prompt: str, project_dir: Path, *, max_turns: int) -> QueryResult:
+        self.prompts.append(prompt)
         self._stats.queries += 1
         return QueryResult(
             text=self._response_text,

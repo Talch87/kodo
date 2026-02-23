@@ -11,6 +11,8 @@ class MockGeminiCliProcess:
     """Mimics subprocess.Popen for gemini CLI.
 
     Produces a single JSON blob on stdout matching `gemini -p ... --output-format json`.
+
+    Extracts the prompt from the command for test inspection.
     """
 
     def __init__(
@@ -30,6 +32,16 @@ class MockGeminiCliProcess:
         self._build_stdout(result_text, input_tokens, output_tokens, error)
         self.stderr = io.StringIO(stderr_text)
         self.pid = 12345
+
+        # Extract prompt: value after -p flag
+        self.prompt = None
+        if "-p" in cmd:
+            idx = cmd.index("-p")
+            if idx + 1 < len(cmd):
+                self.prompt = cmd[idx + 1]
+
+        # Check for resume flag
+        self.has_resume = "--resume" in cmd
 
     def _build_stdout(
         self,

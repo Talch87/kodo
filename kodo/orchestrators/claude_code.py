@@ -30,6 +30,7 @@ def _build_mcp_server(
     verification_state: VerificationState | None = None,
     browser_testing: bool = False,
     verifiers: dict | None = None,
+    auto_commit: bool = False,
 ):
     """Build a FastMCP server exposing each team agent as a tool."""
     from mcp.server.fastmcp import FastMCP
@@ -75,6 +76,7 @@ if the tester or architect find issues, the call is rejected and you must fix th
             browser_testing=browser_testing,
             verifiers=verifiers,
             orchestrator_tag="claude_code",
+            auto_commit=auto_commit,
         )
 
     mcp.add_tool(done)
@@ -100,6 +102,7 @@ class ClaudeCodeOrchestrator(OrchestratorBase):
         prior_summary: str = "",
         browser_testing: bool = False,
         verifiers: dict | None = None,
+        auto_commit: bool = False,
     ) -> CycleResult:
         from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient, ResultMessage
 
@@ -125,6 +128,7 @@ class ClaudeCodeOrchestrator(OrchestratorBase):
             verification_state,
             browser_testing=browser_testing,
             verifiers=verifiers,
+            auto_commit=auto_commit,
         )
 
         options = ClaudeAgentOptions(

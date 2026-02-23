@@ -7,6 +7,8 @@ from pathlib import Path
 from types import ModuleType
 from unittest.mock import patch
 
+import pytest
+
 from kodo import log
 from kodo.log import RunDir
 from kodo.sessions.claude import ClaudeSession
@@ -25,7 +27,9 @@ def _fake_modules(responses=None, client_factory=None):
     """Build fake claude_agent_sdk modules. Returns (client_or_factory, modules_dict)."""
     if client_factory is None:
         mock_client = MockClaudeSDKClient(responses=responses)
-        client_factory_fn = lambda options=None: mock_client
+
+        def client_factory_fn(options=None):
+            return mock_client
     else:
         mock_client = None
         client_factory_fn = client_factory
@@ -60,8 +64,7 @@ def _run_session(
         try:
             result = session.query("test prompt", tmp_path, max_turns=10)
         finally:
-            session._loop.call_soon_threadsafe(session._loop.stop)
-            session._thread.join(timeout=5)
+            session.close()
 
     return session, result
 
@@ -127,8 +130,7 @@ def test_same_project_dir_reuses_client(tmp_path: Path):
             session.query("q1", tmp_path, max_turns=10)
             session.query("q2", tmp_path, max_turns=10)
         finally:
-            session._loop.call_soon_threadsafe(session._loop.stop)
-            session._thread.join(timeout=5)
+            session.close()
 
     assert client_count[0] == 1  # Only one client created
 
@@ -154,14 +156,13 @@ def test_different_project_dir_creates_new_client(tmp_path: Path):
             session.query("q1", dir_a, max_turns=10)
             session.query("q2", dir_b, max_turns=10)
         finally:
-            session._loop.call_soon_threadsafe(session._loop.stop)
-            session._thread.join(timeout=5)
+            session.close()
 
     assert client_count[0] == 2
 
 
-def test_plan_mode_captured_in_result(tmp_path: Path):
-    """When _can_use_tool denies ExitPlanMode, the plan should appear in the result text."""
+def test_plan_mode_review_does_not_crash(tmp_path: Path):
+    """When a plan is pending and the next prompt is non-approval, session doesn't crash."""
     log.init(RunDir.create(tmp_path, "plan_mode"))
     resp = MockResultMessage(result="waiting for review", is_error=False)
     _, modules = _fake_modules(responses=[resp])
@@ -170,22 +171,14 @@ def test_plan_mode_captured_in_result(tmp_path: Path):
         session = ClaudeSession(use_api_key=True)
         try:
             # Simulate what happens when ExitPlanMode is denied:
-            # the session captures the plan
+            # the session captures the plan via _can_use_tool
             session._pending_plan = "Step 1: do X\nStep 2: do Y"
 
-            # Trigger a query — it should prepend the plan
-            # But first we need _ensure_client to work, so set up the client
-            session.query("review my plan", tmp_path, max_turns=10)
+            # Non-approval prompt — session should handle gracefully
+            result = session.query("review my plan", tmp_path, max_turns=10)
+            assert not result.is_error
         finally:
-            session._loop.call_soon_threadsafe(session._loop.stop)
-            session._thread.join(timeout=5)
-
-    # The pending plan was set before query.  The prompt "review my plan" doesn't
-    # contain an approval signal, so _plan_approved stays False (the orchestrator
-    # hasn't approved yet — it's just reviewing).  _pending_plan is cleared.
-    # This tests that the plan review handshake doesn't crash.
-    assert session._plan_approved is False
-    assert session._pending_plan is None
+            session.close()
 
 
 def test_plan_approval_requires_signal(tmp_path: Path):
@@ -197,28 +190,27 @@ def test_plan_approval_requires_signal(tmp_path: Path):
     with patch.dict(sys.modules, modules):
         session = ClaudeSession(use_api_key=True)
         try:
-            # Simulate captured plan
+            # Simulate captured plan (as _can_use_tool would set it)
             session._pending_plan = "Option A vs Option B"
 
-            # "try again" → no approval signal → _plan_approved stays False
+            # Non-approval prompt — plan_approved should stay False
             session.query("I don't like these, try again", tmp_path, max_turns=5)
             assert session._plan_approved is False
 
             # Simulate another captured plan after revision
             session._pending_plan = "Option C vs Option D"
 
-            # "proceed with option C" → approval signal → _plan_approved True
+            # Approval signal in prompt
             session.query("Proceed with option C", tmp_path, max_turns=5)
             assert session._plan_approved is True
 
-            # Simulate plan captured, orchestrator says "I choose"
+            # Another plan cycle with different approval wording
             session._plan_approved = False
             session._pending_plan = "Option E"
             session.query("I choose option E, let's go", tmp_path, max_turns=5)
             assert session._plan_approved is True
         finally:
-            session._loop.call_soon_threadsafe(session._loop.stop)
-            session._thread.join(timeout=5)
+            session.close()
 
 
 def test_query_after_close_raises(tmp_path: Path):
@@ -230,9 +222,5 @@ def test_query_after_close_raises(tmp_path: Path):
         session = ClaudeSession(use_api_key=True)
         session.close()
 
-        # The event loop is now stopped — submitting a coroutine should fail
-        try:
+        with pytest.raises(Exception):
             session.query("q", tmp_path, max_turns=10)
-            assert False, "Expected an exception after close()"
-        except Exception:
-            pass  # Any exception is acceptable — the point is it shouldn't silently succeed

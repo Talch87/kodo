@@ -25,7 +25,7 @@ def project(tmp_path: Path) -> Path:
 
 
 def _fake_launch(
-    run_dir, goal_text, params, plan=None, json_mode=False, auto_refine=False
+    run_dir, goal_text, params, plan=None, json_mode=False, **kwargs
 ):
     """Fake launch_run that returns a successful RunResult."""
     return RunResult(
@@ -38,7 +38,7 @@ def _fake_launch(
 
 
 def _fake_launch_partial(
-    run_dir, goal_text, params, plan=None, json_mode=False, auto_refine=False
+    run_dir, goal_text, params, plan=None, json_mode=False, **kwargs
 ):
     """Fake launch_run that returns a partial RunResult."""
     return RunResult(
@@ -217,3 +217,68 @@ class TestLaunchRunReturnsResult:
 
         assert result is not None
         assert result.finished is True
+
+
+# ---------------------------------------------------------------------------
+# --improve + --json: improve_report key in JSON output
+# ---------------------------------------------------------------------------
+
+
+class TestImproveJsonOutput:
+    @pytest.fixture(autouse=True)
+    def _fake_backends(self):
+        with (
+            patch("kodo.cli.has_claude", return_value=True),
+            patch("kodo.cli.check_api_key", return_value=None),
+        ):
+            yield
+
+    def test_json_includes_improve_report(self, project, capsys):
+        """--improve --json should include improve_report key when report exists."""
+        report_content = (
+            "# Improve Report\n\n"
+            "## Auto-fixed\n"
+            "- foo.py:10 — removed unused import\n"
+            "- bar.py:20 — fixed typo\n\n"
+            "## Needs decision\n"
+            "- baz.py:5 — consider refactoring\n"
+        )
+
+        def _launch_with_report(run_dir, goal_text, params, plan=None, json_mode=False, **kw):
+            # Write the report file into the run dir
+            report_path = run_dir.root / "improve-report.md"
+            report_path.write_text(report_content)
+            return RunResult(
+                cycles=[CycleResult(exchanges=5, total_cost_usd=0.01, finished=True, summary="Done")],
+            )
+
+        with (
+            patch("kodo.cli.launch_run", side_effect=_launch_with_report),
+            patch("kodo.cli.run_intake_noninteractive", return_value=None),
+        ):
+            sys.argv = ["kodo", "--improve", "--json", str(project)]
+            try:
+                _main_inner()
+            except SystemExit:
+                pass
+
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert "improve_report" in output
+        assert "foo.py:10" in output["improve_report"]
+
+    def test_json_no_improve_report_when_no_file(self, project, capsys):
+        """--improve --json should omit improve_report key when report file missing."""
+        with (
+            patch("kodo.cli.launch_run", side_effect=_fake_launch),
+            patch("kodo.cli.run_intake_noninteractive", return_value=None),
+        ):
+            sys.argv = ["kodo", "--improve", "--json", str(project)]
+            try:
+                _main_inner()
+            except SystemExit:
+                pass
+
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert "improve_report" not in output

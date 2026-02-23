@@ -151,6 +151,32 @@ class RunStats:
 _run_stats = RunStats()
 
 
+# ---------------------------------------------------------------------------
+# Test helpers — used by conftest.py to avoid coupling to private vars
+# ---------------------------------------------------------------------------
+
+
+def _test_snapshot():
+    """Capture current module state for later restoration."""
+    return (_log_file, _run_id, _start_time, _runs_root)
+
+
+def _test_restore(snapshot):
+    """Restore module state from a snapshot."""
+    global _log_file, _run_id, _start_time, _runs_root
+    _log_file, _run_id, _start_time, _runs_root = snapshot
+
+
+def _test_redirect_runs(path: Path):
+    """Redirect _runs_root() to a temporary directory for test isolation."""
+    global _runs_root
+
+    def _redirected() -> Path:
+        return path
+
+    _runs_root = _redirected  # type: ignore[assignment]
+
+
 def init(run_dir: RunDir) -> Path:
     """Initialize logging for a run. Returns the log file path.
 

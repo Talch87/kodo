@@ -59,8 +59,7 @@ def test_query_returns_result(tmp_path: Path):
         try:
             result = session.query("say hello", tmp_path, max_turns=10)
         finally:
-            session._loop.call_soon_threadsafe(session._loop.stop)
-            session._thread.join(timeout=5)
+            session.close()
 
     assert result.text == "Hello world"
     assert result.is_error is False
@@ -83,7 +82,12 @@ def test_stats_accumulate(tmp_path: Path):
         usage={"input_tokens": 200, "output_tokens": 80},
     )
 
-    # We need two separate clients for two queries since _ensure_client caches
+    # Two queries to different project dirs forces a reconnect with fresh client
+    dir_a = tmp_path / "a"
+    dir_b = tmp_path / "b"
+    dir_a.mkdir()
+    dir_b.mkdir()
+
     call_count = [0]
 
     def make_client(options=None):
@@ -111,14 +115,10 @@ def test_stats_accumulate(tmp_path: Path):
     ):
         session = ClaudeSession(model="sonnet", use_api_key=True)
         try:
-            session.query("q1", tmp_path, max_turns=10)
-            # Force reconnect for second query to get fresh client with r2
-            session._client = None
-            session._project_dir = None
-            session.query("q2", tmp_path, max_turns=10)
+            session.query("q1", dir_a, max_turns=10)
+            session.query("q2", dir_b, max_turns=10)
         finally:
-            session._loop.call_soon_threadsafe(session._loop.stop)
-            session._thread.join(timeout=5)
+            session.close()
 
     assert session.stats.queries == 2
     assert session.stats.total_input_tokens == 300
@@ -126,7 +126,7 @@ def test_stats_accumulate(tmp_path: Path):
     assert abs(session.stats.total_cost_usd - 0.03) < 1e-9
 
 
-def test_reset_disconnects(tmp_path: Path):
+def test_reset_clears_stats(tmp_path: Path):
     log.init(RunDir.create(tmp_path, "claude_reset"))
     mock_client, fake_modules = _install_mock_sdk()
 
@@ -137,10 +137,8 @@ def test_reset_disconnects(tmp_path: Path):
             assert session.stats.queries == 1
             session.reset()
             assert session.stats.queries == 0
-            assert session._client is None
         finally:
-            session._loop.call_soon_threadsafe(session._loop.stop)
-            session._thread.join(timeout=5)
+            session.close()
 
 
 def test_extract_tokens_variants():
@@ -184,8 +182,7 @@ def test_api_key_stripped_by_default(tmp_path: Path, monkeypatch):
         try:
             session.query("q", tmp_path, max_turns=10)
         finally:
-            session._loop.call_soon_threadsafe(session._loop.stop)
-            session._thread.join(timeout=5)
+            session.close()
 
     # Key should have been stripped during _ensure_client
     assert keys_during_init[0] is None
@@ -227,7 +224,6 @@ def test_api_key_kept_when_explicit(tmp_path: Path, monkeypatch):
         try:
             session.query("q", tmp_path, max_turns=10)
         finally:
-            session._loop.call_soon_threadsafe(session._loop.stop)
-            session._thread.join(timeout=5)
+            session.close()
 
     assert keys_during_init[0] == "sk-test-secret"

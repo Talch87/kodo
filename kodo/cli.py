@@ -27,6 +27,38 @@ from kodo.factory import (
 from kodo.log import RunDir
 from kodo.orchestrators.base import GoalPlan, GoalStage, ResumeState
 from kodo.team_config import load_team_config, build_team_from_json
+from kodo.user_config import get_user_default
+
+
+_IMPROVE_GOAL = """\
+Analyze this codebase and produce a concrete improvement report.
+
+1. Run the existing test suite — note any failures or flaky tests.
+2. Run linters/type-checkers if configured (ruff, mypy, pyright, eslint, tsc …).
+3. Read through the core modules and flag:
+   • obvious bugs or logic errors
+   • dead code / unused imports
+   • missing error handling
+   • security concerns (hardcoded secrets, unsanitised input, etc.)
+   • performance hot-spots
+4. For every issue found, either:
+   a. **Auto-fix** it (if the fix is safe and unambiguous), or
+   b. **Flag it** with a one-line description and suggested fix.
+
+Write your findings to `{report_path}` in this format:
+
+```markdown
+# Improve Report
+
+## Auto-fixed
+- <file>:<line> — <description of what was fixed>
+
+## Needs decision
+- <file>:<line> — <description + suggested fix>
+```
+
+Commit all auto-fixes in a single commit with message "chore: auto-fix issues found by kodo improve".
+"""
 
 
 _BACKEND_LABELS = {
@@ -90,6 +122,13 @@ def _build_intake_prompt(output_path: str, staged: bool) -> str:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _extract_section(text: str, heading: str) -> str:
+    """Extract the body of a markdown section (## heading) from *text*."""
+    pattern = rf"^## {re.escape(heading)}\s*\n(.*?)(?=^## |\Z)"
+    m = re.search(pattern, text, re.MULTILINE | re.DOTALL)
+    return m.group(1) if m else ""
 
 
 # ---------------------------------------------------------------------------
@@ -644,6 +683,7 @@ def launch_run(
         max_cycles=max_cycles,
         plan=plan,
         verifiers=verifiers,
+        auto_commit=params.get("auto_commit", True),
     )
 
     if not json_mode:
@@ -738,6 +778,7 @@ def launch_resume(run_dir: RunDir, state: log.RunState):
         resume=resume,
         plan=plan,
         verifiers=verifiers,
+        auto_commit=params.get("auto_commit", True),
     )
 
     total_cycles = state.completed_cycles + len(result.cycles)
@@ -774,16 +815,18 @@ def _fail(msg: str, code: int = 1) -> None:
     sys.exit(code)
 
 
-def _emit_json_and_exit(args, result) -> None:
+def _emit_json_and_exit(args, result, improve_report: str | None = None) -> None:
     """If --json, emit result JSON to stdout and exit. Otherwise no-op."""
     if not args.json:
         return
     sys.stdout = _original_stdout
-    print(json.dumps(_format_json_output(result), indent=2))
+    print(json.dumps(_format_json_output(result, improve_report=improve_report), indent=2))
     sys.exit(EXIT_SUCCESS if result.finished else EXIT_PARTIAL)
 
 
-def _format_json_output(result=None, error: str | None = None) -> dict:
+def _format_json_output(
+    result=None, error: str | None = None, improve_report: str | None = None
+) -> dict:
     """Build the structured JSON output dict."""
     if error is not None:
         return {"status": "error", "error": error}
@@ -815,6 +858,9 @@ def _format_json_output(result=None, error: str | None = None) -> dict:
             }
             for sr in result.stage_results
         ]
+
+    if improve_report is not None:
+        output["improve_report"] = improve_report
 
     return output
 
@@ -902,6 +948,13 @@ def _build_params_from_flags(args, project_dir: Path) -> dict:
         "max_exchanges": args.exchanges or mode.default_max_exchanges,
         "max_cycles": args.cycles or mode.default_max_cycles,
     }
+
+    # Auto-commit: on by default, disabled with --no-auto-commit or user config
+    auto_commit = get_user_default("auto_commit", True)
+    if getattr(args, "no_auto_commit", False):
+        auto_commit = False
+    params["auto_commit"] = auto_commit
+
     _save_config(project_dir, params)
     return params
 
@@ -1023,6 +1076,12 @@ def _main_inner() -> None:
         default=None,
         help="Path to a file containing the goal text. Enables non-interactive mode.",
     )
+    goal_group.add_argument(
+        "--improve",
+        action="store_true",
+        default=False,
+        help="Analyze codebase, auto-fix safe issues, and produce an improvement report.",
+    )
 
     # Non-interactive config flags
     parser.add_argument("--mode", type=str, default=None, choices=["saga", "mission"])
@@ -1065,6 +1124,12 @@ def _main_inner() -> None:
         default=False,
         help="Skip all confirmation prompts.",
     )
+    parser.add_argument(
+        "--no-auto-commit",
+        action="store_true",
+        default=False,
+        help="Disable auto-commit after completed stages/goals.",
+    )
 
     parser.add_argument(
         "project_dir",
@@ -1074,11 +1139,20 @@ def _main_inner() -> None:
     )
     args = parser.parse_args()
 
-    # --json implies --yes
-    if args.json:
+    # --json and --auto-refine imply --yes
+    if args.json or args.auto_refine:
         args.yes = True
 
-    non_interactive = args.goal is not None or args.goal_file is not None
+    # --improve forces non-interactive, skip-intake, yes, and defaults mode to saga
+    if args.improve:
+        args.skip_intake = True
+        args.yes = True
+        if args.mode is None:
+            args.mode = "saga"
+
+    non_interactive = (
+        args.goal is not None or args.goal_file is not None or args.improve
+    )
     skip_prompts = non_interactive or args.yes
 
     # In JSON mode, redirect prints to stderr so stdout stays clean for JSON
@@ -1093,7 +1167,7 @@ def _main_inner() -> None:
         _print_banner()
 
     if non_interactive and args.resume is not None:
-        _fail("--resume cannot be used with --goal/--goal-file")
+        _fail("--resume cannot be used with --goal/--goal-file/--improve")
 
     project_dir = Path(args.project_dir)
     project_dir.mkdir(parents=True, exist_ok=True)
@@ -1133,7 +1207,9 @@ def _main_inner() -> None:
 
     # 1. Get goal
     if non_interactive:
-        if args.goal:
+        if args.improve:
+            goal_text = None  # constructed after run_dir is created
+        elif args.goal:
             goal_text = args.goal
         else:
             goal_path = Path(args.goal_file)
@@ -1168,6 +1244,11 @@ def _main_inner() -> None:
 
     # 3. Create run directory
     run_dir = RunDir.create(project_dir)
+
+    # Construct --improve goal now that we have a run_dir
+    if args.improve:
+        report_path = run_dir.root / "improve-report.md"
+        goal_text = _IMPROVE_GOAL.format(report_path=report_path)
 
     # 4. Intake / goal plan
     plan: GoalPlan | None = None
@@ -1247,7 +1328,29 @@ def _main_inner() -> None:
 
     # 6. Launch
     result = launch_run(run_dir, goal_text, params, plan=plan, json_mode=args.json)
-    _emit_json_and_exit(args, result)
+
+    # 7. --improve post-run: report summary
+    if args.improve:
+        report_path = run_dir.root / "improve-report.md"
+        if report_path.exists():
+            report_content = report_path.read_text()
+            auto_fixed = len(re.findall(
+                r"^- .+$", _extract_section(report_content, "Auto-fixed"), re.MULTILINE
+            ))
+            needs_decision = len(re.findall(
+                r"^- .+$", _extract_section(report_content, "Needs decision"), re.MULTILINE
+            ))
+            print(f"\n{'=' * 50}")
+            print(f"Improve report: {report_path}")
+            print(f"  Auto-fixed:     {auto_fixed}")
+            print(f"  Needs decision: {needs_decision}")
+
+            if args.json:
+                _emit_json_and_exit(args, result, improve_report=report_content)
+                return
+        _emit_json_and_exit(args, result)
+    else:
+        _emit_json_and_exit(args, result)
 
 
 if __name__ == "__main__":

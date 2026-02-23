@@ -34,6 +34,7 @@ class FakeOrchestrator(OrchestratorBase):
         prior_summary: str = "",
         browser_testing: bool = False,
         verifiers: dict | None = None,
+        auto_commit: bool = False,
     ) -> CycleResult:
         self._cycle_calls.append(
             {

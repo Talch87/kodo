@@ -13,6 +13,8 @@ import pytest
 from tests.conftest import make_scripted_session
 from kodo.cli import (
     _build_params_from_flags,
+    _extract_section,
+    _IMPROVE_GOAL,
     run_intake_noninteractive,
     _main_inner,
 )
@@ -30,6 +32,7 @@ def _make_args(**overrides) -> Namespace:
     defaults = dict(
         goal="Build something",
         goal_file=None,
+        improve=False,
         mode=None,
         exchanges=None,
         cycles=None,
@@ -411,3 +414,132 @@ class TestNonInteractiveEndToEnd:
                 mock_launch.call_args.kwargs.get("plan") or mock_launch.call_args[0][3]
             )
             assert len(launched_plan.stages) == 1
+
+
+# ---------------------------------------------------------------------------
+# TestImproveFlag
+# ---------------------------------------------------------------------------
+
+
+class TestImproveFlag:
+    @pytest.fixture(autouse=True)
+    def _fake_backends(self):
+        with (
+            patch("kodo.cli.has_claude", return_value=True),
+            patch("kodo.cli.check_api_key", return_value=None),
+        ):
+            yield
+
+    def test_improve_populates_goal_from_template(self, project):
+        """--improve should construct goal text from _IMPROVE_GOAL template."""
+        with (
+            patch("kodo.cli.launch_run") as mock_launch,
+            patch("kodo.cli.run_intake_noninteractive", return_value=None),
+        ):
+            sys.argv = ["kodo", "--improve", str(project)]
+            _main_inner()
+            goal_arg = mock_launch.call_args[0][1]
+            assert "improvement report" in goal_arg.lower() or "improve" in goal_arg.lower()
+            assert "improve-report.md" in goal_arg
+
+    def test_improve_skips_intake(self, project):
+        """--improve should skip intake interview."""
+        with (
+            patch("kodo.cli.launch_run"),
+            patch("kodo.cli.run_intake_noninteractive") as mock_intake,
+        ):
+            sys.argv = ["kodo", "--improve", str(project)]
+            _main_inner()
+            mock_intake.assert_not_called()
+
+    def test_improve_defaults_to_saga_mode(self, project):
+        """--improve should default mode to saga."""
+        with (
+            patch("kodo.cli.launch_run") as mock_launch,
+            patch("kodo.cli.run_intake_noninteractive", return_value=None),
+        ):
+            sys.argv = ["kodo", "--improve", str(project)]
+            _main_inner()
+            params = mock_launch.call_args[0][2]
+            assert params["mode"] == "saga"
+
+    def test_improve_respects_explicit_mode(self, project):
+        """--improve should not override an explicitly set --mode."""
+        with (
+            patch("kodo.cli.launch_run") as mock_launch,
+            patch("kodo.cli.run_intake_noninteractive", return_value=None),
+        ):
+            sys.argv = ["kodo", "--improve", "--mode", "mission", str(project)]
+            _main_inner()
+            params = mock_launch.call_args[0][2]
+            assert params["mode"] == "mission"
+
+    def test_improve_no_interactive_prompts(self, project):
+        """--improve must never call input() or questionary."""
+        with (
+            patch("kodo.cli.launch_run"),
+            patch("kodo.cli.run_intake_noninteractive", return_value=None),
+            patch(
+                "builtins.input",
+                side_effect=AssertionError("input() should not be called"),
+            ),
+            patch(
+                "questionary.select",
+                side_effect=AssertionError("questionary should not be called"),
+            ),
+        ):
+            sys.argv = ["kodo", "--improve", str(project)]
+            _main_inner()
+
+    def test_improve_mutually_exclusive_with_goal(self):
+        """--improve and --goal should be mutually exclusive."""
+        with pytest.raises(SystemExit):
+            sys.argv = ["kodo", "--improve", "--goal", "Build X"]
+            _main_inner()
+
+    def test_improve_mutually_exclusive_with_goal_file(self, project):
+        """--improve and --goal-file should be mutually exclusive."""
+        goal_file = project / "g.md"
+        goal_file.write_text("Build X")
+        with pytest.raises(SystemExit):
+            sys.argv = ["kodo", "--improve", "--goal-file", str(goal_file)]
+            _main_inner()
+
+
+# ---------------------------------------------------------------------------
+# TestExtractSection
+# ---------------------------------------------------------------------------
+
+
+class TestExtractSection:
+    def test_extracts_auto_fixed(self):
+        report = (
+            "# Improve Report\n\n"
+            "## Auto-fixed\n"
+            "- foo.py:10 — removed unused import\n"
+            "- bar.py:20 — fixed typo\n\n"
+            "## Needs decision\n"
+            "- baz.py:5 — consider refactoring\n"
+        )
+        section = _extract_section(report, "Auto-fixed")
+        assert "foo.py:10" in section
+        assert "bar.py:20" in section
+        assert "baz.py:5" not in section
+
+    def test_extracts_needs_decision(self):
+        report = (
+            "# Improve Report\n\n"
+            "## Auto-fixed\n"
+            "- foo.py:10 — removed unused import\n\n"
+            "## Needs decision\n"
+            "- baz.py:5 — consider refactoring\n"
+            "- qux.py:99 — dead code\n"
+        )
+        section = _extract_section(report, "Needs decision")
+        assert "baz.py:5" in section
+        assert "qux.py:99" in section
+        assert "foo.py:10" not in section
+
+    def test_returns_empty_for_missing_section(self):
+        report = "# Improve Report\n\n## Auto-fixed\n- x\n"
+        assert _extract_section(report, "Needs decision") == ""

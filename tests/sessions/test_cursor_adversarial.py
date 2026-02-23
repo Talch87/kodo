@@ -83,11 +83,12 @@ def test_system_prompt_resent_after_reset(tmp_path: Path):
     log.init(RunDir.create(tmp_path, "reset_sysprompt"))
     session = CursorSession(system_prompt="Be careful.")
 
-    calls = []
+    procs = []
 
     def factory(cmd, **kwargs):
-        calls.append(cmd)
-        return MockCursorProcess(cmd, result_text="ok", chat_id="c1", **kwargs)
+        proc = MockCursorProcess(cmd, result_text="ok", chat_id="c1", **kwargs)
+        procs.append(proc)
+        return proc
 
     with patch("kodo.sessions.base.subprocess.Popen", factory):
         session.query("first", tmp_path, max_turns=10)
@@ -95,8 +96,8 @@ def test_system_prompt_resent_after_reset(tmp_path: Path):
         session.query("second", tmp_path, max_turns=10)
 
     # Both first and post-reset queries should have system prompt
-    assert "Be careful." in calls[0][-1]
-    assert "Be careful." in calls[1][-1]
+    assert "Be careful." in procs[0].prompt
+    assert "Be careful." in procs[1].prompt
 
 
 def test_large_result_text_not_truncated(tmp_path: Path):

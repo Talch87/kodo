@@ -186,6 +186,57 @@ def handle_agent_call(
     return report
 
 
+def _auto_commit(
+    team: TeamConfig,
+    project_dir: Path,
+    summary: str,
+) -> None:
+    """Dispatch a worker to commit completed work after verification passes.
+
+    Non-fatal: logs warnings on failure but never raises.
+    """
+    from kodo import log
+
+    # Find a worker: prefer worker_fast, fall back to worker_smart, then any
+    worker = (
+        team.get("worker_fast")
+        or team.get("worker_smart")
+        or next((a for a in team.values()), None)
+    )
+    if worker is None:
+        log.tprint("[auto-commit] no worker available, skipping")
+        log.emit("auto_commit_skip", reason="no_worker")
+        return
+
+    worker_name = next(
+        (n for n, a in team.items() if a is worker), "worker"
+    )
+
+    directive = (
+        "Review `git diff` and `git status`. Stage the relevant changed files "
+        "and commit with a clear, concise message describing what was accomplished. "
+        "Do NOT push. Do NOT commit unrelated or generated files.\n\n"
+        f"Summary of completed work:\n{summary}"
+    )
+
+    log.tprint(f"[auto-commit] dispatching {worker_name} to commit...")
+    log.emit("auto_commit_start", worker=worker_name)
+
+    try:
+        result = worker.run(
+            directive,
+            project_dir,
+            new_conversation=True,
+            agent_name=f"{worker_name}_auto_commit",
+        )
+        report = (result.text or "")[:2000]
+        log.emit("auto_commit_done", worker=worker_name, report=report)
+        log.tprint(f"[auto-commit] {worker_name} finished")
+    except Exception as exc:
+        log.emit("auto_commit_error", worker=worker_name, error=str(exc))
+        log.tprint(f"[auto-commit] {worker_name} failed: {exc}")
+
+
 def handle_done(
     summary: str,
     success: bool,
@@ -198,6 +249,7 @@ def handle_done(
     browser_testing: bool = False,
     verifiers: dict | None = None,
     orchestrator_tag: str | None = None,
+    auto_commit: bool = False,
 ) -> str:
     """Shared done-handler logic for both orchestrators.
 
@@ -229,6 +281,10 @@ def handle_done(
         log.emit("orchestrator_done_rejected", **tag, rejection=rejection[:5000])
         log.tprint("[done] REJECTED — verification found issues")
         return rejection
+
+    # Auto-commit after successful verification
+    if auto_commit:
+        _auto_commit(team, project_dir, summary)
 
     done_signal.called = True
     done_signal.summary = summary
@@ -514,6 +570,7 @@ class Orchestrator(Protocol):
         prior_summary: str = "",
         browser_testing: bool = False,
         verifiers: dict | None = None,
+        auto_commit: bool = False,
     ) -> CycleResult:
         """Run one cycle of orchestrated work."""
         ...
@@ -529,6 +586,7 @@ class Orchestrator(Protocol):
         resume: ResumeState | None = None,
         plan: GoalPlan | None = None,
         verifiers: dict | None = None,
+        auto_commit: bool = False,
     ) -> RunResult:
         """Run multiple cycles until done or limit reached."""
         ...
@@ -555,6 +613,7 @@ class OrchestratorBase:
         prior_summary: str = "",
         browser_testing: bool = False,
         verifiers: dict | None = None,
+        auto_commit: bool = False,
     ) -> CycleResult:
         raise NotImplementedError
 
@@ -569,6 +628,7 @@ class OrchestratorBase:
         resume: ResumeState | None = None,
         plan: GoalPlan | None = None,
         verifiers: dict | None = None,
+        auto_commit: bool = False,
     ) -> RunResult:
         from kodo import log
         from kodo.sessions.claude import ClaudeSession
@@ -629,6 +689,7 @@ class OrchestratorBase:
                     max_cycles=max_cycles,
                     resume=resume,
                     verifiers=verifiers,
+                    auto_commit=auto_commit,
                 )
             else:
                 self._run_single(
@@ -641,6 +702,7 @@ class OrchestratorBase:
                     start_cycle=start_cycle,
                     prior_summary=prior_summary,
                     verifiers=verifiers,
+                    auto_commit=auto_commit,
                 )
         finally:
             self._summarizer.shutdown()
@@ -682,6 +744,7 @@ class OrchestratorBase:
         start_cycle: int,
         prior_summary: str,
         verifiers: dict | None = None,
+        auto_commit: bool = False,
     ) -> None:
         """Original single-goal execution loop."""
         from kodo import log
@@ -703,6 +766,7 @@ class OrchestratorBase:
                 max_exchanges=max_exchanges,
                 prior_summary=prior_summary,
                 verifiers=verifiers,
+                auto_commit=auto_commit,
             )
             result.cycles.append(cycle_result)
 
@@ -723,6 +787,7 @@ class OrchestratorBase:
         max_cycles: int,
         resume: ResumeState | None = None,
         verifiers: dict | None = None,
+        auto_commit: bool = False,
     ) -> None:
         """Staged execution: iterate over plan stages with a shared cycle budget."""
         from kodo import log
@@ -790,6 +855,7 @@ class OrchestratorBase:
                     prior_summary=prior_summary,
                     browser_testing=stage.browser_testing,
                     verifiers=verifiers,
+                    auto_commit=auto_commit,
                 )
                 cycle_result.stage_index = stage.index
                 result.cycles.append(cycle_result)

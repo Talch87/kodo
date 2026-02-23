@@ -36,6 +36,7 @@ from kodo.orchestrators.base import (
 _MODEL_PRICING: dict[str, tuple[float, float]] = {
     "claude-opus-4-6": (5, 25),
     "claude-sonnet-4-5-20250929": (3, 15),
+    "gemini-3.1-pro-preview": (2.0, 12.0),
     "gemini-3-pro-preview": (2.0, 12.0),
     "gemini-3-flash-preview": (0.50, 3.0),
 }
@@ -44,6 +45,7 @@ _MODEL_PRICING: dict[str, tuple[float, float]] = {
 _PYDANTIC_MODEL_MAP: dict[str, str] = {
     "claude-opus-4-6": "anthropic:claude-opus-4-6",
     "claude-sonnet-4-5-20250929": "anthropic:claude-sonnet-4-5-20250929",
+    "gemini-3.1-pro-preview": "google-gla:gemini-3.1-pro-preview",
     "gemini-3-pro-preview": "google-gla:gemini-3-pro-preview",
     "gemini-3-flash-preview": "google-gla:gemini-3-flash-preview",
 }
@@ -58,6 +60,7 @@ def _build_tools(
     verification_state: VerificationState | None = None,
     browser_testing: bool = False,
     verifiers: dict | None = None,
+    auto_commit: bool = False,
 ) -> list[Tool]:
     """Build pydantic-ai Tool objects for each team agent + the done tool."""
     tools: list[Tool] = []
@@ -100,6 +103,7 @@ def _build_tools(
             verification_state=verification_state,
             browser_testing=browser_testing,
             verifiers=verifiers,
+            auto_commit=auto_commit,
         )
 
     tools.append(Tool(done, takes_ctx=False))
@@ -160,6 +164,7 @@ class ApiOrchestrator(OrchestratorBase):
         prior_summary: str = "",
         browser_testing: bool = False,
         verifiers: dict | None = None,
+        auto_commit: bool = False,
     ) -> CycleResult:
         done_signal = DoneSignal()
         verification_state = VerificationState()
@@ -172,6 +177,7 @@ class ApiOrchestrator(OrchestratorBase):
             verification_state,
             browser_testing=browser_testing,
             verifiers=verifiers,
+            auto_commit=auto_commit,
         )
         result = CycleResult()
 

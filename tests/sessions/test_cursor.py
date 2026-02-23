@@ -64,20 +64,21 @@ def test_system_prompt_prepended_once(tmp_path: Path):
     log.init(RunDir.create(tmp_path, "cursor_sysprompt"))
     session = CursorSession(model="composer-1.5", system_prompt="Be helpful.")
 
-    calls = []
+    procs = []
 
     def capturing_factory(cmd, **kwargs):
-        calls.append(cmd)
-        return MockCursorProcess(cmd, result_text="ok", chat_id="c1", **kwargs)
+        proc = MockCursorProcess(cmd, result_text="ok", chat_id="c1", **kwargs)
+        procs.append(proc)
+        return proc
 
     with patch("kodo.sessions.base.subprocess.Popen", capturing_factory):
         session.query("task1", tmp_path, max_turns=10)
         session.query("task2", tmp_path, max_turns=10)
 
-    # First command should have system prompt prepended
-    assert "Be helpful." in calls[0][-1]
-    # Second command should NOT have system prompt
-    assert "Be helpful." not in calls[1][-1]
+    # First query should have system prompt in the prompt
+    assert "Be helpful." in procs[0].prompt
+    # Second query should NOT have system prompt
+    assert "Be helpful." not in procs[1].prompt
 
 
 def test_error_on_nonzero_returncode(tmp_path: Path):

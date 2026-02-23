@@ -15,6 +15,8 @@ class MockCodexProcess:
 
     Use error_message to simulate bad-model or auth errors (emits error event,
     clears result_text so CodexSession surfaces the formatted error).
+
+    Extracts the prompt and resume ID from the command for test inspection.
     """
 
     def __init__(
@@ -46,6 +48,16 @@ class MockCodexProcess:
         )
         self.stderr = io.StringIO(stderr_text)
         self.pid = 12345
+
+        # Extract prompt and resume info from command for test inspection.
+        # "codex exec <prompt> ..." or "codex exec resume <session_id> ..."
+        self.prompt = None
+        self.resume_id = None
+        if len(cmd) >= 3 and cmd[1] == "exec":
+            if cmd[2] == "resume" and len(cmd) >= 4:
+                self.resume_id = cmd[3]
+            else:
+                self.prompt = cmd[2]
 
     def _build_stdout(
         self,

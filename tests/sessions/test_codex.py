@@ -66,21 +66,23 @@ def test_system_prompt_prepended_once(tmp_path: Path):
     log.init(RunDir.create(tmp_path, "codex_sysprompt"))
     session = CodexSession(model="o4-mini", system_prompt="Be helpful.")
 
-    calls = []
+    procs = []
 
     def capturing_factory(cmd, **kwargs):
-        calls.append(cmd)
-        return MockCodexProcess(cmd, result_text="ok", session_id="t1", **kwargs)
+        proc = MockCodexProcess(cmd, result_text="ok", session_id="t1", **kwargs)
+        procs.append(proc)
+        return proc
 
     with patch("kodo.sessions.base.subprocess.Popen", capturing_factory):
         session.query("task1", tmp_path, max_turns=10)
         session.query("task2", tmp_path, max_turns=10)
 
-    # First query: system prompt is in the prompt (which is cmd[2] for non-resume)
-    first_prompt = calls[0][2]  # codex exec <prompt> ...
-    assert "Be helpful." in first_prompt
+    # First query: system prompt is in the prompt
+    assert procs[0].prompt is not None
+    assert "Be helpful." in procs[0].prompt
 
-    # Second query uses resume (session ID captured), system prompt not re-sent
+    # Second query uses resume (session ID captured), no prompt in command
+    assert procs[1].resume_id is not None
 
 
 def test_error_on_nonzero_returncode(tmp_path: Path):

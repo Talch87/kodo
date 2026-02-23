@@ -65,24 +65,24 @@ def test_system_prompt_prepended_once(tmp_path: Path):
     log.init(RunDir.create(tmp_path, "gemini_sysprompt"))
     session = GeminiCliSession(model="gemini-2.5-flash", system_prompt="Be helpful.")
 
-    calls = []
+    procs = []
 
     def capturing_factory(cmd, **kwargs):
-        calls.append(cmd)
-        return MockGeminiCliProcess(cmd, result_text="ok", **kwargs)
+        proc = MockGeminiCliProcess(cmd, result_text="ok", **kwargs)
+        procs.append(proc)
+        return proc
 
     with patch("kodo.sessions.base.subprocess.Popen", capturing_factory):
         session.query("task1", tmp_path, max_turns=10)
         session.query("task2", tmp_path, max_turns=10)
 
-    # First query: -p flag value should contain system prompt
-    # cmd is: gemini -p <prompt> -y --output-format json -m <model>
-    prompt_idx = calls[0].index("-p") + 1
-    assert "Be helpful." in calls[0][prompt_idx]
+    # First query should have system prompt in the prompt
+    assert procs[0].prompt is not None
+    assert "Be helpful." in procs[0].prompt
 
     # Second query should NOT have system prompt
-    prompt_idx2 = calls[1].index("-p") + 1
-    assert "Be helpful." not in calls[1][prompt_idx2]
+    assert procs[1].prompt is not None
+    assert "Be helpful." not in procs[1].prompt
 
 
 def test_error_on_nonzero_returncode(tmp_path: Path):
@@ -111,11 +111,11 @@ def test_reset_starts_fresh_session(tmp_path: Path):
         session.query("task", tmp_path, max_turns=10)
 
     assert session.stats.queries == 1
-    assert session._has_queried is True
+    assert session.session_id is not None
 
     session.reset()
     assert session.stats.queries == 0
-    assert session._has_queried is False
+    assert session.session_id is None
 
     # After reset, next query should NOT have --resume
     calls = []

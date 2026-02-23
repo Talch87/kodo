@@ -63,6 +63,7 @@ def check_api_key(orchestrator: str, model: str) -> str | None:
         "gemini-pro",
         "gemini-flash",
         "gemini-3-pro-preview",
+        "gemini-3.1-pro-preview",
         "gemini-3-flash-preview",
     }
     if model in _GEMINI_ALIASES or model.startswith("gemini"):
@@ -390,9 +391,19 @@ def get_mode(name: str) -> Mode:
 _MODEL_ALIASES: dict[str, str] = {
     "opus": "claude-opus-4-6",
     "sonnet": "claude-sonnet-4-5-20250929",
-    "gemini-pro": "gemini-3-pro-preview",
+    "gemini-pro": "gemini-3.1-pro-preview",
     "gemini-flash": "gemini-3-flash-preview",
 }
+
+
+def default_fallback(model: str) -> str | None:
+    """Return a sensible fallback model for *model*, or None."""
+    full = _MODEL_ALIASES.get(model, model)
+    if full.startswith("claude"):
+        return "gemini-3.1-pro-preview"
+    if full.startswith("gemini"):
+        return "claude-sonnet-4-5-20250929"
+    return None
 
 
 def model_alias_for_display(full_model_id: str) -> str:
