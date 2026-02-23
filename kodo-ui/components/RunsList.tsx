@@ -1,6 +1,7 @@
 'use client'
 
 import { useStore } from '@/lib/store'
+import { formatDistanceToNow } from 'date-fns'
 
 export default function RunsList() {
   const { runs, setCurrentRun } = useStore()
@@ -43,7 +44,7 @@ export default function RunsList() {
               <td className="px-6 py-4 text-sm">{Math.round(run.progress)}%</td>
               <td className="px-6 py-4 text-sm font-medium">${run.cost.toFixed(2)}</td>
               <td className="px-6 py-4 text-sm text-gray-500">
-                {new Date(run.startTime).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                {formatDistanceToNow(new Date(run.startTime), { addSuffix: true })}
               </td>
             </tr>
           ))}

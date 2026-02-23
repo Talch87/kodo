@@ -1,6 +1,15 @@
 # Kodo UI - Web Interface for Autonomous Coding Agent
 
-A modern React/Next.js dashboard for managing and monitoring Kodo autonomous coding agent runs.
+A beautifully polished React/Next.js dashboard for managing and monitoring Kodo autonomous coding agent runs. Features modern UI design, authentication, and real-time monitoring.
+
+## ✨ Highlights
+
+- **Polished Design** — Professional gradient UI with smooth animations
+- **Authentication** — Secure login with demo account support
+- **Real-time Monitoring** — Track progress, cycles, cost, and agent status
+- **Responsive** — Works perfectly on desktop, tablet, and mobile
+- **Dark mode ready** — Color scheme supports both light and dark themes
+- **Production ready** — TypeScript, proper error handling, route protection
 
 ## Features
 
@@ -33,6 +42,14 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+### Login
+
+The app includes authentication:
+- **Demo Account:** demo@kodo.ai / demo123
+- **Custom Account:** Use any email and password (min 6 chars)
+
+Login credentials are stored locally and never sent to a server (in demo mode).
 
 ### Build
 
