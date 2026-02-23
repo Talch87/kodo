@@ -193,7 +193,7 @@ def run_intake_chat(
     output_file = run_dir.goal_plan_file if staged else run_dir.goal_refined_file
     prompt = _build_intake_prompt(str(output_file), staged)
     model = "opus" if backend == "claude" else "composer-1.5"
-    session = make_session(backend, model, budget=None, system_prompt=prompt)
+    session = make_session(backend, model, system_prompt=prompt)
 
     print(f"\n  {_DIM}Intake interview — type {_BOLD}/done{_RESET}{_DIM} or empty line to finish{_RESET}")
     _print_separator()
@@ -308,7 +308,7 @@ def run_intake_auto(
     output_file = run_dir.goal_refined_file
     prompt = _AUTO_REFINE_PROMPT.format(goal=goal_text, output_path=str(output_file))
     model = "opus" if backend == "claude" else "composer-1.5"
-    session = make_session(backend, model, budget=None, system_prompt=prompt)
+    session = make_session(backend, model, system_prompt=prompt)
 
     project_dir = run_dir.project_dir
     print("\n--- Auto-refining goal (no human input) ---")
@@ -509,21 +509,12 @@ def select_params() -> dict:
         "Max cycles:", cycle_presets, default_index=cy_default_idx
     )
 
-    print("\n  Budget per step limits spending on each agent call.")
-    print("  Only matters for API-billed sessions; ignored on subscription.")
-    budget_raw = _select_numeric(
-        "Budget per step (USD):", ["None", "1.00", "5.00"], type_fn=float
-    )
-
-    budget = None if budget_raw == "None" else float(budget_raw)
-
     return {
         "mode": mode_name,
         "orchestrator": orchestrator,
         "orchestrator_model": orch_model,
         "max_exchanges": int(max_exchanges),
         "max_cycles": int(max_cycles),
-        "budget_per_step": budget,
     }
 
 
@@ -567,8 +558,6 @@ def _load_or_select_params(project_dir: Path) -> dict:
             print(
                 f"    Exchanges:    {prev['max_exchanges']}/cycle, {prev['max_cycles']} cycles"
             )
-            if prev.get("budget_per_step"):
-                print(f"    Budget/step:  ${prev['budget_per_step']:.2f}")
             reuse = input("\n  Reuse this config? [Y/n] ").strip().lower()
             if not reuse or reuse == "y":
                 return prev
@@ -602,13 +591,13 @@ def launch_run(
     # Try loading a team JSON config; fall back to hardcoded mode
     team_config = load_team_config(params["mode"], project_dir)
     if team_config:
-        team = build_team_from_json(team_config, params["budget_per_step"])
+        team = build_team_from_json(team_config)
         system_prompt = team_config.get("orchestrator_prompt") or mode.system_prompt
         verifiers = team_config.get("verifiers")
         max_exchanges = team_config.get("max_exchanges", params["max_exchanges"])
         max_cycles = team_config.get("max_cycles", params["max_cycles"])
     else:
-        team = mode.build_team(params["budget_per_step"])
+        team = mode.build_team()
         system_prompt = mode.system_prompt
         max_exchanges = params["max_exchanges"]
         max_cycles = params["max_cycles"]
@@ -677,7 +666,6 @@ def launch_resume(run_dir: RunDir, state: log.RunState):
         "orchestrator_model": state.model,
         "max_exchanges": state.max_exchanges,
         "max_cycles": state.max_cycles,
-        "budget_per_step": state.budget_per_step,
     }
 
     mode = get_mode(params["mode"])
@@ -685,11 +673,11 @@ def launch_resume(run_dir: RunDir, state: log.RunState):
 
     team_config = load_team_config(params["mode"], project_dir)
     if team_config:
-        team = build_team_from_json(team_config, params["budget_per_step"])
+        team = build_team_from_json(team_config)
         system_prompt = team_config.get("orchestrator_prompt") or mode.system_prompt
         verifiers = team_config.get("verifiers")
     else:
-        team = mode.build_team(params["budget_per_step"])
+        team = mode.build_team()
         system_prompt = mode.system_prompt
 
     orchestrator = build_orchestrator(
@@ -901,7 +889,6 @@ def _build_params_from_flags(args, project_dir: Path) -> dict:
         "orchestrator_model": orch_model,
         "max_exchanges": args.exchanges or mode.default_max_exchanges,
         "max_cycles": args.cycles or mode.default_max_cycles,
-        "budget_per_step": args.budget,
     }
     _save_config(project_dir, params)
     return params
@@ -931,7 +918,7 @@ def run_intake_noninteractive(
         "Do NOT ask clarifying questions. Analyze the project and goal, "
         "make reasonable assumptions, and write the goal-plan.json file immediately."
     )
-    session = make_session(backend, model, budget=None, system_prompt=prompt)
+    session = make_session(backend, model, system_prompt=prompt)
 
     project_dir = run_dir.project_dir
     initial = f"Here's my project goal:\n\n{goal_text}"
@@ -1039,9 +1026,6 @@ def _main_inner() -> None:
         type=str,
         default=None,
         choices=["opus", "sonnet", "gemini-pro", "gemini-flash"],
-    )
-    parser.add_argument(
-        "--budget", type=float, default=None, help="Budget per step in USD"
     )
     parser.add_argument(
         "--skip-intake",
@@ -1235,8 +1219,6 @@ def _main_inner() -> None:
         print(
             f"  Exchanges:    {params['max_exchanges']}/cycle, {params['max_cycles']} cycles"
         )
-        if params["budget_per_step"]:
-            print(f"  Budget/step:  ${params['budget_per_step']:.2f}")
         print()
 
     if not skip_prompts:

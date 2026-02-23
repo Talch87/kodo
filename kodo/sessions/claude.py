@@ -29,7 +29,6 @@ class ClaudeSession:
     def __init__(
         self,
         model: str = "sonnet",
-        max_budget_usd: float | None = None,
         system_prompt: str | None = None,
         chrome: bool = False,
         fallback_model: str | None = None,
@@ -37,7 +36,6 @@ class ClaudeSession:
         resume_session_id: str | None = None,
     ):
         self.model = model
-        self.max_budget_usd = max_budget_usd
         self.system_prompt = system_prompt
         self.chrome = chrome
         self.fallback_model = fallback_model
@@ -143,7 +141,6 @@ class ClaudeSession:
                 disallowed_tools=["AskUserQuestion"],
                 model=self.model,
                 fallback_model=self.fallback_model,
-                max_budget_usd=self.max_budget_usd,
                 extra_args=extra_args,
                 debug_stderr=None,
                 stderr=lambda msg: log.emit("claude_stderr", message=msg),

@@ -16,7 +16,8 @@ from kodo.orchestrators.base import (
     TeamConfig,
     VerificationState,
     build_cycle_prompt,
-    verify_done,
+    handle_agent_call,
+    handle_done,
 )
 
 
@@ -40,60 +41,15 @@ def _build_mcp_server(
         def _make_handler(agent_name, agent_obj, agent_desc):
             def handler(task: str, new_conversation: bool = False) -> str:
                 """Delegate a task to this agent."""
-                log.tprint(f"[orchestrator] → {agent_name}: {task[:100]}...")
-                log.emit(
-                    "orchestrator_tool_call",
-                    orchestrator="claude_code",
-                    agent=agent_name,
-                    task=task,
+                return handle_agent_call(
+                    agent_name,
+                    agent_obj,
+                    task,
+                    project_dir,
+                    summarizer,
                     new_conversation=new_conversation,
+                    orchestrator_tag="claude_code",
                 )
-
-                if new_conversation:
-                    log.tprint(f"[{agent_name}] new conversation requested")
-
-                try:
-                    result = agent_obj.run(
-                        task,
-                        project_dir,
-                        new_conversation=new_conversation,
-                        agent_name=agent_name,
-                    )
-                except Exception as exc:
-                    error_msg = (
-                        f"[ERROR] {agent_name} crashed: {type(exc).__name__}: {exc}"
-                    )
-                    log.emit("agent_crash", agent=agent_name, error=str(exc))
-                    log.tprint(error_msg)
-                    return error_msg
-
-                report = result.format_report()[:10000]
-                log.emit(
-                    "orchestrator_tool_result",
-                    orchestrator="claude_code",
-                    agent=agent_name,
-                    elapsed_s=result.elapsed_s,
-                    is_error=result.is_error,
-                    context_reset=result.context_reset,
-                    session_tokens=result.session_tokens,
-                    report=report,
-                )
-
-                done_msg = f"[{agent_name}] done ({result.elapsed_s:.1f}s)"
-                if agent_obj.session.cost_bucket != "cursor_subscription":
-                    done_msg += f" | session: {result.session_tokens:,} tokens"
-                log.tprint(done_msg)
-                if result.is_error:
-                    log.tprint(f"[{agent_name}] reported error")
-                if result.context_reset:
-                    log.tprint(
-                        f"[{agent_name}] context reset: {result.context_reset_reason}"
-                    )
-
-                log.print_stats_table()
-
-                summarizer.summarize(agent_name, task, report)
-                return report
 
             handler.__name__ = f"ask_{agent_name}"
             handler.__doc__ = (
@@ -108,46 +64,18 @@ def _build_mcp_server(
     def done(summary: str, success: bool) -> str:
         """Signal that the goal is complete. Runs automated verification first — \
 if the tester or architect find issues, the call is rejected and you must fix them."""
-        log.emit(
-            "orchestrator_done_attempt",
-            orchestrator="claude_code",
-            summary=summary,
-            success=success,
-        )
-        log.tprint(f"[orchestrator] DONE requested (success={success}): {summary}")
-
-        if not success:
-            done_signal.called = True
-            done_signal.summary = summary
-            done_signal.success = False
-            return "Acknowledged (marked as unsuccessful)."
-
-        rejection = verify_done(
-            goal,
+        return handle_done(
             summary,
+            success,
+            done_signal,
+            goal,
             team,
             project_dir,
-            state=verification_state,
+            verification_state=verification_state,
             browser_testing=browser_testing,
             verifiers=verifiers,
+            orchestrator_tag="claude_code",
         )
-        if rejection:
-            log.emit(
-                "orchestrator_done_rejected",
-                orchestrator="claude_code",
-                rejection=rejection[:5000],
-            )
-            log.tprint("[done] REJECTED — verification found issues")
-            return rejection
-
-        done_signal.called = True
-        done_signal.summary = summary
-        done_signal.success = True
-        log.emit(
-            "orchestrator_done_accepted", orchestrator="claude_code", summary=summary
-        )
-        log.tprint("[done] ACCEPTED — all checks pass")
-        return "Verified and accepted. All checks pass."
 
     mcp.add_tool(done)
     return mcp

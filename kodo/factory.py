@@ -127,7 +127,6 @@ _WORKER_SMART_SAGA_EXTRA = (
 
 
 def _build_team_saga(
-    budget: float | None = None,
     *,
     worker_timeout_s: float | None = 1800,
     tester_timeout_s: float | None = 1800,
@@ -147,7 +146,7 @@ def _build_team_saga(
     team: TeamConfig = {}
 
     if _has_cursor:
-        worker_fast_session = make_session("cursor", "composer-1.5", budget)
+        worker_fast_session = make_session("cursor", "composer-1.5")
         team["worker_fast"] = Agent(
             worker_fast_session,
             _WORKER_FAST_DESC + _WORKER_FAST_SAGA_EXTRA,
@@ -156,7 +155,7 @@ def _build_team_saga(
         )
 
         tester_session = make_session(
-            "cursor", "composer-1.5", budget, system_prompt=TESTER_PROMPT
+            "cursor", "composer-1.5", system_prompt=TESTER_PROMPT
         )
         team["tester"] = Agent(
             tester_session,
@@ -169,7 +168,6 @@ def _build_team_saga(
         tester_browser_session = make_session(
             "cursor",
             "composer-1.5",
-            budget,
             system_prompt=TESTER_BROWSER_PROMPT,
             chrome=True,
         )
@@ -182,7 +180,7 @@ def _build_team_saga(
         )
 
     if _has_codex and "worker_fast" not in team:
-        worker_fast_session = make_session("codex", "gpt-5.2-codex", budget)
+        worker_fast_session = make_session("codex", "gpt-5.2-codex")
         team["worker_fast"] = Agent(
             worker_fast_session,
             _WORKER_FAST_DESC + _WORKER_FAST_SAGA_EXTRA,
@@ -191,7 +189,7 @@ def _build_team_saga(
         )
 
     if _has_gemini_cli and "worker_fast" not in team:
-        worker_fast_session = make_session("gemini-cli", "gemini-2.5-flash", budget)
+        worker_fast_session = make_session("gemini-cli", "gemini-2.5-flash")
         team["worker_fast"] = Agent(
             worker_fast_session,
             _WORKER_FAST_DESC + _WORKER_FAST_SAGA_EXTRA,
@@ -201,7 +199,7 @@ def _build_team_saga(
 
     if _has_claude:
         worker_smart_session = make_session(
-            "claude", "opus", None, fallback_model="sonnet"
+            "claude", "opus", fallback_model="sonnet"
         )
         team["worker_smart"] = Agent(
             worker_smart_session,
@@ -213,7 +211,6 @@ def _build_team_saga(
         architect_session = make_session(
             "claude",
             "opus",
-            None,
             system_prompt=ARCHITECT_PROMPT,
             fallback_model="sonnet",
         )
@@ -228,7 +225,7 @@ def _build_team_saga(
     return team
 
 
-def _build_team_mission(budget: float | None = None) -> TeamConfig:
+def _build_team_mission() -> TeamConfig:
     """Create a mission team, skipping workers whose backends are unavailable."""
     _has_cursor = has_cursor()
     _has_codex = has_codex()
@@ -243,7 +240,7 @@ def _build_team_mission(budget: float | None = None) -> TeamConfig:
     team: TeamConfig = {}
 
     if _has_cursor:
-        worker_fast_session = make_session("cursor", "composer-1.5", budget)
+        worker_fast_session = make_session("cursor", "composer-1.5")
         team["worker_fast"] = Agent(
             worker_fast_session,
             _WORKER_FAST_DESC,
@@ -252,7 +249,7 @@ def _build_team_mission(budget: float | None = None) -> TeamConfig:
         )
 
     if _has_codex and "worker_fast" not in team:
-        worker_fast_session = make_session("codex", "gpt-5.2-codex", budget)
+        worker_fast_session = make_session("codex", "gpt-5.2-codex")
         team["worker_fast"] = Agent(
             worker_fast_session,
             _WORKER_FAST_DESC,
@@ -261,7 +258,7 @@ def _build_team_mission(budget: float | None = None) -> TeamConfig:
         )
 
     if _has_gemini_cli and "worker_fast" not in team:
-        worker_fast_session = make_session("gemini-cli", "gemini-2.5-flash", budget)
+        worker_fast_session = make_session("gemini-cli", "gemini-2.5-flash")
         team["worker_fast"] = Agent(
             worker_fast_session,
             _WORKER_FAST_DESC,
@@ -273,7 +270,6 @@ def _build_team_mission(budget: float | None = None) -> TeamConfig:
         worker_smart_session = make_session(
             "claude",
             "opus",
-            None,
             fallback_model="sonnet",
         )
         team["worker_smart"] = Agent(
@@ -399,6 +395,12 @@ _MODEL_ALIASES: dict[str, str] = {
     "gemini-pro": "gemini-3-pro-preview",
     "gemini-flash": "gemini-3-flash-preview",
 }
+
+
+def model_alias_for_display(full_model_id: str) -> str:
+    """Return short alias for display, or full ID if no alias."""
+    rev = {v: k for k, v in _MODEL_ALIASES.items()}
+    return rev.get(full_model_id, full_model_id)
 
 
 def build_orchestrator(

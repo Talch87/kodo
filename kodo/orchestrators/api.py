@@ -28,7 +28,8 @@ from kodo.orchestrators.base import (
     TeamConfig,
     VerificationState,
     build_cycle_prompt,
-    verify_done,
+    handle_agent_call,
+    handle_done,
 )
 
 # Per-1M-token pricing: (input, output)
@@ -65,58 +66,14 @@ def _build_tools(
 
         def _make_handler(agent_name: str, agent_obj):
             def handler(task: str, new_conversation: bool = False) -> str:
-                log.tprint(f"[orchestrator] → {agent_name}: {task[:100]}...")
-                if new_conversation:
-                    log.tprint("[orchestrator]   (new conversation)")
-
-                log.emit(
-                    "orchestrator_tool_call",
-                    agent=agent_name,
-                    task=task,
+                return handle_agent_call(
+                    agent_name,
+                    agent_obj,
+                    task,
+                    project_dir,
+                    summarizer,
                     new_conversation=new_conversation,
                 )
-
-                try:
-                    agent_result = agent_obj.run(
-                        task,
-                        project_dir,
-                        new_conversation=new_conversation,
-                        agent_name=agent_name,
-                    )
-                except Exception as exc:
-                    error_msg = (
-                        f"[ERROR] {agent_name} crashed: {type(exc).__name__}: {exc}"
-                    )
-                    log.emit("agent_crash", agent=agent_name, error=str(exc))
-                    log.tprint(error_msg)
-                    return error_msg
-
-                report = agent_result.format_report()[:10000]
-                log.emit(
-                    "orchestrator_tool_result",
-                    agent=agent_name,
-                    elapsed_s=agent_result.elapsed_s,
-                    is_error=agent_result.is_error,
-                    context_reset=agent_result.context_reset,
-                    session_tokens=agent_result.session_tokens,
-                    report=report,
-                )
-
-                done_msg = f"[{agent_name}] done ({agent_result.elapsed_s:.1f}s)"
-                if agent_obj.session.cost_bucket != "cursor_subscription":
-                    done_msg += f" | session: {agent_result.session_tokens:,} tokens"
-                log.tprint(done_msg)
-                if agent_result.is_error:
-                    log.tprint(f"[{agent_name}] reported error")
-                if agent_result.context_reset:
-                    log.tprint(
-                        f"[{agent_name}] context reset: {agent_result.context_reset_reason}"
-                    )
-
-                log.print_stats_table()
-
-                summarizer.summarize(agent_name, task, report)
-                return report
 
             return handler
 
@@ -133,35 +90,17 @@ def _build_tools(
         """Signal that the goal is complete (or cannot be completed).
         This triggers automated verification by the tester and architect.
         If they find issues, the call is rejected and you must fix them first."""
-        log.emit("orchestrator_done_attempt", summary=summary, success=success)
-        log.tprint(f"[orchestrator] DONE requested (success={success}): {summary}")
-
-        if not success:
-            done_signal.called = True
-            done_signal.summary = summary
-            done_signal.success = False
-            return "Acknowledged (marked as unsuccessful)."
-
-        rejection = verify_done(
-            goal,
+        return handle_done(
             summary,
+            success,
+            done_signal,
+            goal,
             team,
             project_dir,
-            state=verification_state,
+            verification_state=verification_state,
             browser_testing=browser_testing,
             verifiers=verifiers,
         )
-        if rejection:
-            log.emit("orchestrator_done_rejected", rejection=rejection[:5000])
-            log.tprint("[done] REJECTED — verification found issues")
-            return rejection
-
-        done_signal.called = True
-        done_signal.summary = summary
-        done_signal.success = True
-        log.emit("orchestrator_done_accepted", summary=summary)
-        log.tprint("[done] ACCEPTED — all checks pass")
-        return "Verified and accepted. All checks pass."
 
     tools.append(Tool(done, takes_ctx=False))
     return tools

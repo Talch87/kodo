@@ -35,7 +35,6 @@ def _make_args(**overrides) -> Namespace:
         cycles=None,
         orchestrator=None,
         orchestrator_model=None,
-        budget=None,
         skip_intake=False,
         resume=None,
         project_dir=".",
@@ -98,16 +97,6 @@ class TestBuildParamsFromFlags:
         args = _make_args(orchestrator="api", orchestrator_model="opus")
         params = _build_params_from_flags(args, project)
         assert params["orchestrator"] == "api"
-
-    def test_budget_none_by_default(self, project):
-        args = _make_args()
-        params = _build_params_from_flags(args, project)
-        assert params["budget_per_step"] is None
-
-    def test_budget_explicit(self, project):
-        args = _make_args(budget=5.0)
-        params = _build_params_from_flags(args, project)
-        assert params["budget_per_step"] == 5.0
 
     def test_saves_config_to_disk(self, project):
         args = _make_args()
@@ -353,8 +342,6 @@ class TestNonInteractiveEndToEnd:
                 "api",
                 "--orchestrator-model",
                 "gemini-pro",
-                "--budget",
-                "3.50",
                 str(project),
             ]
             _main_inner()
@@ -365,7 +352,6 @@ class TestNonInteractiveEndToEnd:
             assert params["max_cycles"] == 7
             assert params["orchestrator"] == "api"
             assert params["orchestrator_model"] == "gemini-pro"
-            assert params["budget_per_step"] == 3.50
 
     def test_skip_intake_flag(self, project):
         """--skip-intake should prevent intake from running."""

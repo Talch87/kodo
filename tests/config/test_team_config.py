@@ -129,7 +129,7 @@ class TestBuildTeamFromJson:
             }
         }
 
-        team = build_team_from_json(config, budget=1.0)
+        team = build_team_from_json(config)
         assert "worker" in team
         assert "tester" in team
         assert team["worker"].max_turns == 25
@@ -233,7 +233,6 @@ class TestBuildTeamFromJson:
         mock_make_session.assert_called_once_with(
             "claude",
             "opus",
-            None,
             system_prompt=None,
             chrome=True,
             fallback_model="sonnet",

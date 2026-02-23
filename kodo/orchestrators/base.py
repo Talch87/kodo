@@ -100,54 +100,144 @@ Agents decide: code structure, libraries, patterns, file organization.
 """.strip()
 
 
-def build_team_tools(team: TeamConfig) -> list[dict]:
-    """Build Anthropic-style tool definitions from a team config."""
-    tools = []
-    for name, agent in team.items():
-        tools.append(
-            {
-                "name": f"ask_{name}",
-                "description": f"Delegate a task to the {name} agent.\n{agent.description.strip()}",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "task": {
-                            "type": "string",
-                            "description": f"The directive/task to give to {name}.",
-                        },
-                        "new_conversation": {
-                            "type": "boolean",
-                            "description": "Reset agent's session (rarely needed). Default: false.",
-                        },
-                    },
-                    "required": ["task"],
-                },
-            }
+# ---------------------------------------------------------------------------
+# Shared handler functions — used by both ApiOrchestrator and ClaudeCodeOrchestrator
+# ---------------------------------------------------------------------------
+
+
+def handle_agent_call(
+    agent_name: str,
+    agent_obj: "Agent",
+    task: str,
+    project_dir: Path,
+    summarizer,
+    *,
+    new_conversation: bool = False,
+    cycle_log: list[str] | None = None,
+    orchestrator_tag: str | None = None,
+) -> str:
+    """Run an agent and return its report (or error string on crash).
+
+    *cycle_log*: if provided, task/result snippets are appended (used by
+    ApiOrchestrator for fallback model context).
+    *orchestrator_tag*: if set, included as ``orchestrator=`` in log events.
+    """
+    from kodo import log
+
+    tag = {"orchestrator": orchestrator_tag} if orchestrator_tag else {}
+
+    log.tprint(f"[orchestrator] → {agent_name}: {task[:100]}...")
+    if new_conversation:
+        log.tprint("[orchestrator]   (new conversation)")
+
+    if cycle_log is not None:
+        cycle_log.append(f"→ {agent_name}: {task[:200]}")
+
+    log.emit(
+        "orchestrator_tool_call",
+        **tag,
+        agent=agent_name,
+        task=task,
+        new_conversation=new_conversation,
+    )
+
+    try:
+        agent_result = agent_obj.run(
+            task,
+            project_dir,
+            new_conversation=new_conversation,
+            agent_name=agent_name,
+        )
+    except Exception as exc:
+        error_msg = f"[ERROR] {agent_name} crashed: {type(exc).__name__}: {exc}"
+        log.emit("agent_crash", agent=agent_name, error=str(exc))
+        log.tprint(error_msg)
+        if cycle_log is not None:
+            cycle_log.append(f"← {agent_name}: {error_msg}")
+        return error_msg
+
+    report = agent_result.format_report()[:10000]
+    log.emit(
+        "orchestrator_tool_result",
+        **tag,
+        agent=agent_name,
+        elapsed_s=agent_result.elapsed_s,
+        is_error=agent_result.is_error,
+        context_reset=agent_result.context_reset,
+        session_tokens=agent_result.session_tokens,
+        report=report,
+    )
+
+    done_msg = f"[{agent_name}] done ({agent_result.elapsed_s:.1f}s)"
+    if agent_obj.session.cost_bucket != "cursor_subscription":
+        done_msg += f" | session: {agent_result.session_tokens:,} tokens"
+    log.tprint(done_msg)
+    if agent_result.is_error:
+        log.tprint(f"[{agent_name}] reported error")
+    if agent_result.context_reset:
+        log.tprint(
+            f"[{agent_name}] context reset: {agent_result.context_reset_reason}"
         )
 
-    tools.append(
-        {
-            "name": "done",
-            "description": "Signal that the goal is complete (or cannot be completed). "
-            "This triggers automated verification by the tester and architect. "
-            "If they find issues, the call is rejected and you must fix them first.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "summary": {
-                        "type": "string",
-                        "description": "Summary of what was accomplished.",
-                    },
-                    "success": {
-                        "type": "boolean",
-                        "description": "Whether the goal was achieved.",
-                    },
-                },
-                "required": ["summary", "success"],
-            },
-        }
+    log.print_stats_table()
+
+    if cycle_log is not None:
+        cycle_log.append(f"← {agent_name}: {report[:500]}")
+
+    summarizer.summarize(agent_name, task, report)
+    return report
+
+
+def handle_done(
+    summary: str,
+    success: bool,
+    done_signal: "DoneSignal",
+    goal: str,
+    team: TeamConfig,
+    project_dir: Path,
+    *,
+    verification_state: "VerificationState | None" = None,
+    browser_testing: bool = False,
+    verifiers: dict | None = None,
+    orchestrator_tag: str | None = None,
+) -> str:
+    """Shared done-handler logic for both orchestrators.
+
+    Returns the string result to pass back to the orchestrator model.
+    """
+    from kodo import log
+
+    tag = {"orchestrator": orchestrator_tag} if orchestrator_tag else {}
+
+    log.emit("orchestrator_done_attempt", **tag, summary=summary, success=success)
+    log.tprint(f"[orchestrator] DONE requested (success={success}): {summary}")
+
+    if not success:
+        done_signal.called = True
+        done_signal.summary = summary
+        done_signal.success = False
+        return "Acknowledged (marked as unsuccessful)."
+
+    rejection = verify_done(
+        goal,
+        summary,
+        team,
+        project_dir,
+        state=verification_state,
+        browser_testing=browser_testing,
+        verifiers=verifiers,
     )
-    return tools
+    if rejection:
+        log.emit("orchestrator_done_rejected", **tag, rejection=rejection[:5000])
+        log.tprint("[done] REJECTED — verification found issues")
+        return rejection
+
+    done_signal.called = True
+    done_signal.summary = summary
+    done_signal.success = True
+    log.emit("orchestrator_done_accepted", **tag, summary=summary)
+    log.tprint("[done] ACCEPTED — all checks pass")
+    return "Verified and accepted. All checks pass."
 
 
 # Verification signal strings — used in agent prompts and _check_passed()

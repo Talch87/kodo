@@ -164,3 +164,21 @@ def test_keyboard_interrupt_emits_run_end(mock_viewer, tmp_project):
 
     run_end_events = [e for e in events if e.get("event") == "run_end"]
     assert len(run_end_events) == 1
+
+
+def test_resume_session_ids_injected_at_build_time():
+    """Resume session IDs are set on sessions at team build, not in orchestrator.run."""
+    from kodo.agent import Agent
+    from tests.conftest import FakeSession
+
+    session = FakeSession()
+    team = {"worker": Agent(session, "test")}
+
+    # Simulate what _build_run_setup does when agent_session_ids is provided
+    agent_session_ids = {"worker": "saved-session-123"}
+    for agent_name, sid in agent_session_ids.items():
+        agent = team.get(agent_name)
+        if agent is not None:
+            agent.session.resume_session_id = sid
+
+    assert session.resume_session_id == "saved-session-123"

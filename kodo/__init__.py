@@ -1,6 +1,6 @@
 """kodo — autonomous goal-driven coding agent."""
 
-__version__ = "0.4.26"
+__version__ = "0.4.27"
 
 from kodo import log
 from kodo.agent import Agent, AgentResult
@@ -48,7 +48,6 @@ ARCHITECT_PROMPT = (
 def make_session(
     backend: str,
     model: str,
-    budget: float | None,
     system_prompt: str | None = None,
     chrome: bool = False,
     fallback_model: str | None = None,
@@ -74,7 +73,6 @@ def make_session(
         return CursorSession(model=model, system_prompt=system_prompt)
     return ClaudeSession(
         model=model,
-        max_budget_usd=budget,
         system_prompt=system_prompt,
         chrome=chrome,
         fallback_model=fallback_model,

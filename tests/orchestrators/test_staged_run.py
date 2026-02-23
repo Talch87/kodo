@@ -365,7 +365,6 @@ def _cli_args_event(**overrides):
         "t": 0.1,
         "event": "cli_args",
         "mode": "saga",
-        "budget_per_step": None,
         **overrides,
     }
 

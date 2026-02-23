@@ -190,7 +190,7 @@ class TestLaunchRunReturnsResult:
             name="saga",
             description="test",
             system_prompt="test",
-            build_team=lambda _budget: fake_team,
+            build_team=lambda: fake_team,
             default_max_exchanges=30,
             default_max_cycles=5,
         )
@@ -212,7 +212,6 @@ class TestLaunchRunReturnsResult:
                     "orchestrator_model": "opus",
                     "max_exchanges": 10,
                     "max_cycles": 1,
-                    "budget_per_step": None,
                 },
             )
 

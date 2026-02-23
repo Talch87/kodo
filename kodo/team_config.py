@@ -68,10 +68,7 @@ def _load_json(path: Path) -> dict:
     return data
 
 
-def build_team_from_json(
-    config: dict,
-    budget: float | None = None,
-) -> TeamConfig:
+def build_team_from_json(config: dict) -> TeamConfig:
     """Build a TeamConfig from a parsed team JSON config.
 
     Skips agents whose backends are unavailable (with a warning).
@@ -118,7 +115,6 @@ def build_team_from_json(
         session = make_session(
             backend,
             model,
-            budget,
             system_prompt=system_prompt,
             chrome=chrome,
             fallback_model=fallback_model,

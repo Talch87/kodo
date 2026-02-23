@@ -33,7 +33,7 @@ def test_cycle_done_returns_finished(tmp_path: Path):
 
     with (
         patch("kodo.orchestrators.api.Agent.__init__", fake_agent_init),
-        patch("kodo.orchestrators.api.verify_done", return_value=None),
+        patch("kodo.orchestrators.base.verify_done", return_value=None),
     ):
         orch = ApiOrchestrator(model="claude-opus-4-6")
         result = orch.cycle("build feature", tmp_path, team, max_exchanges=10)
