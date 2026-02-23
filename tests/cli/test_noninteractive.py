@@ -12,6 +12,7 @@ import pytest
 
 from tests.conftest import make_scripted_session
 from kodo.cli import (
+    _build_improve_plan,
     _build_params_from_flags,
     _extract_section,
     run_intake_noninteractive,
@@ -506,6 +507,120 @@ class TestImproveFlag:
         with pytest.raises(SystemExit):
             sys.argv = ["kodo", "--improve", "--goal-file", str(goal_file)]
             _main_inner()
+
+    def test_improve_passes_staged_plan(self, project):
+        """--improve should pass a GoalPlan (not None) to launch_run."""
+        with (
+            patch("kodo.cli.launch_run") as mock_launch,
+            patch("kodo.cli.run_intake_noninteractive", return_value=None),
+        ):
+            sys.argv = ["kodo", "--improve", str(project)]
+            _main_inner()
+            plan = mock_launch.call_args.kwargs.get(
+                "plan",
+                mock_launch.call_args[0][3]
+                if len(mock_launch.call_args[0]) > 3
+                else None,
+            )
+            assert plan is not None
+            assert len(plan.stages) == 4
+
+    def test_improve_plan_stage_order(self, project):
+        """--improve stages should follow the right sequence."""
+        with (
+            patch("kodo.cli.launch_run") as mock_launch,
+            patch("kodo.cli.run_intake_noninteractive", return_value=None),
+        ):
+            sys.argv = ["kodo", "--improve", str(project)]
+            _main_inner()
+            plan = mock_launch.call_args.kwargs.get(
+                "plan",
+                mock_launch.call_args[0][3]
+                if len(mock_launch.call_args[0]) > 3
+                else None,
+            )
+            names = [s.name for s in plan.stages]
+            assert names == [
+                "Baseline & Static Analysis",
+                "Happy Path Integration Testing",
+                "Exploratory & Adversarial Testing",
+                "Fix & Report",
+            ]
+
+
+# ---------------------------------------------------------------------------
+# TestBuildImprovePlan
+# ---------------------------------------------------------------------------
+
+
+class TestBuildImprovePlan:
+    """Tests for _build_improve_plan() structure."""
+
+    def test_has_four_stages(self):
+        plan = _build_improve_plan("/tmp/report.md")
+        assert len(plan.stages) == 4
+
+    def test_stages_have_sequential_indices(self):
+        plan = _build_improve_plan("/tmp/report.md")
+        assert [s.index for s in plan.stages] == [1, 2, 3, 4]
+
+    def test_report_path_in_final_stage(self):
+        plan = _build_improve_plan("/tmp/my-report.md")
+        last = plan.stages[-1]
+        assert "/tmp/my-report.md" in last.description
+        assert "/tmp/my-report.md" in last.acceptance_criteria
+
+    def test_time_guidance_in_integration_stages(self):
+        """Stages 2 and 3 should include time efficiency guidance."""
+        plan = _build_improve_plan("/tmp/report.md")
+        for stage in plan.stages[1:3]:
+            assert "Mock or stub" in stage.description
+            assert "30 seconds" in stage.description
+
+    def test_time_guidance_not_in_static_stage(self):
+        """Stage 1 (static analysis) should not have time guidance."""
+        plan = _build_improve_plan("/tmp/report.md")
+        assert "Mock or stub" not in plan.stages[0].description
+
+    def test_all_stages_have_acceptance_criteria(self):
+        plan = _build_improve_plan("/tmp/report.md")
+        for stage in plan.stages:
+            assert stage.acceptance_criteria, f"Stage {stage.index} missing criteria"
+
+    def test_context_emphasizes_running_software(self):
+        plan = _build_improve_plan("/tmp/report.md")
+        assert "RUNNING" in plan.context
+
+    def test_stages_2_and_3_are_parallel(self):
+        """Stages 2 and 3 should share the same parallel_group."""
+        plan = _build_improve_plan("/tmp/report.md")
+        assert plan.stages[1].parallel_group == 1
+        assert plan.stages[2].parallel_group == 1
+
+    def test_stages_1_and_4_are_sequential(self):
+        """Stages 1 and 4 should have no parallel_group (sequential)."""
+        plan = _build_improve_plan("/tmp/report.md")
+        assert plan.stages[0].parallel_group is None
+        assert plan.stages[3].parallel_group is None
+
+    def test_parallel_stage_descriptions_mention_findings_file(self):
+        """Stage descriptions should tell agents where to write findings."""
+        plan = _build_improve_plan("/tmp/report.md")
+        assert "findings-happy-path.md" in plan.stages[1].description
+        assert "findings-adversarial.md" in plan.stages[2].description
+
+    def test_fix_stage_references_both_findings_files(self):
+        """Stage 4 should tell agents to read both findings files."""
+        plan = _build_improve_plan("/tmp/report.md")
+        fix_stage = plan.stages[3]
+        assert "findings-happy-path.md" in fix_stage.description
+        assert "findings-adversarial.md" in fix_stage.description
+
+    def test_parallel_stages_instruct_no_source_modification(self):
+        """Read-only parallel stages should explicitly say not to modify code."""
+        plan = _build_improve_plan("/tmp/report.md")
+        for stage in plan.stages[1:3]:
+            assert "Do NOT modify source code" in stage.description
 
 
 # ---------------------------------------------------------------------------

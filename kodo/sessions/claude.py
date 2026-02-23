@@ -163,6 +163,16 @@ class ClaudeSession:
                 pass  # anyio cancel scope mismatch on cleanup — harmless
             self._client = None
 
+    def clone(self) -> "ClaudeSession":
+        """Create a fresh session with the same config but no state."""
+        return ClaudeSession(
+            model=self.model,
+            system_prompt=self.system_prompt,
+            chrome=self.chrome,
+            fallback_model=self.fallback_model,
+            use_api_key=self.use_api_key,
+        )
+
     def close(self) -> None:
         """Stop the event loop and join the background thread."""
         self._disconnect()

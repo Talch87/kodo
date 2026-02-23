@@ -65,7 +65,7 @@ def main():
     if LOG_PATH.exists():
         lines = LOG_PATH.read_text().strip().splitlines()
         # Use full log (</script> fix allows embedding agent output that contains viewer HTML)
-        events = [json.loads(l) for l in lines]
+        events = [json.loads(line) for line in lines]
     else:
         events = MINIMAL_EVENTS
 

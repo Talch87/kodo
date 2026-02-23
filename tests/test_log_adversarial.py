@@ -65,7 +65,7 @@ def test_init_twice_switches_log_file(tmp_path: Path):
 
     # run2 file should have its own init + event
     run2_lines = f2.read_text().strip().split("\n")
-    events = [json.loads(l)["event"] for l in run2_lines]
+    events = [json.loads(line)["event"] for line in run2_lines]
     assert "run_init" in events
     assert "event_in_run2" in events
 

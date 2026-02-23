@@ -17,6 +17,9 @@ from kodo.orchestrators.base import (
     OrchestratorBase,
     ResumeState,
     compose_stage_goal,
+    create_worktree,
+    execution_groups,
+    remove_worktree,
 )
 from tests.conftest import make_agent
 
@@ -575,3 +578,402 @@ def test_load_goal_plan(tmp_path):
     # Invalid JSON → None
     run_dir.goal_plan_file.write_text("not json")
     assert _load_goal_plan(run_dir) is None
+
+
+# ── execution_groups() tests ─────────────────────────────────────────────
+
+
+class TestExecutionGroups:
+    """Tests for execution_groups() — pure function grouping stages."""
+
+    def test_all_sequential(self):
+        """Stages with no parallel_group are each their own group."""
+        plan = _make_plan(3)
+        groups = execution_groups(plan)
+        assert len(groups) == 3
+        assert all(len(g) == 1 for g in groups)
+
+    def test_parallel_group_collapses(self):
+        """Stages with the same parallel_group end up in one group."""
+        plan = GoalPlan(
+            context="test",
+            stages=[
+                GoalStage(index=1, name="S1", description="d", acceptance_criteria="c"),
+                GoalStage(index=2, name="S2", description="d", acceptance_criteria="c",
+                          parallel_group=1),
+                GoalStage(index=3, name="S3", description="d", acceptance_criteria="c",
+                          parallel_group=1),
+                GoalStage(index=4, name="S4", description="d", acceptance_criteria="c"),
+            ],
+        )
+        groups = execution_groups(plan)
+        assert len(groups) == 3  # S1, [S2,S3], S4
+        assert len(groups[0]) == 1
+        assert len(groups[1]) == 2
+        assert len(groups[2]) == 1
+
+    def test_parallel_group_ordering(self):
+        """Parallel group is inserted at position of first member."""
+        plan = GoalPlan(
+            context="test",
+            stages=[
+                GoalStage(index=1, name="A", description="d", acceptance_criteria="c"),
+                GoalStage(index=2, name="B", description="d", acceptance_criteria="c",
+                          parallel_group=1),
+                GoalStage(index=3, name="C", description="d", acceptance_criteria="c",
+                          parallel_group=1),
+                GoalStage(index=4, name="D", description="d", acceptance_criteria="c"),
+            ],
+        )
+        groups = execution_groups(plan)
+        assert groups[0][0].name == "A"
+        assert {s.name for s in groups[1]} == {"B", "C"}
+        assert groups[2][0].name == "D"
+
+    def test_multiple_parallel_groups(self):
+        """Multiple distinct parallel groups."""
+        plan = GoalPlan(
+            context="test",
+            stages=[
+                GoalStage(index=1, name="S1", description="d", acceptance_criteria="c",
+                          parallel_group=1),
+                GoalStage(index=2, name="S2", description="d", acceptance_criteria="c",
+                          parallel_group=1),
+                GoalStage(index=3, name="S3", description="d", acceptance_criteria="c"),
+                GoalStage(index=4, name="S4", description="d", acceptance_criteria="c",
+                          parallel_group=2),
+                GoalStage(index=5, name="S5", description="d", acceptance_criteria="c",
+                          parallel_group=2),
+            ],
+        )
+        groups = execution_groups(plan)
+        assert len(groups) == 3  # [S1,S2], S3, [S4,S5]
+        assert len(groups[0]) == 2
+        assert len(groups[1]) == 1
+        assert len(groups[2]) == 2
+
+    def test_empty_plan(self):
+        plan = GoalPlan(context="test", stages=[])
+        assert execution_groups(plan) == []
+
+
+# ── Parallel staged run tests ────────────────────────────────────────────
+
+
+def _make_parallel_plan() -> GoalPlan:
+    """Plan with S1 sequential, S2+S3 parallel, S4 sequential."""
+    return GoalPlan(
+        context="test parallel",
+        stages=[
+            GoalStage(index=1, name="Setup", description="d1", acceptance_criteria="c1"),
+            GoalStage(index=2, name="TestA", description="d2", acceptance_criteria="c2",
+                      parallel_group=1),
+            GoalStage(index=3, name="TestB", description="d3", acceptance_criteria="c3",
+                      parallel_group=1),
+            GoalStage(index=4, name="Fix", description="d4", acceptance_criteria="c4"),
+        ],
+    )
+
+
+@patch("kodo.orchestrators.base.open_viewer", create=True)
+def test_parallel_stages_both_run(mock_viewer, tmp_project):
+    """Both parallel stages should execute and produce stage results."""
+    plan = _make_parallel_plan()
+    orch = FakeOrchestrator(
+        cycle_results=[
+            CycleResult(summary="setup done", finished=True),
+            # Parallel group: S2 and S3 each get one cycle
+            CycleResult(summary="testA findings", finished=True),
+            CycleResult(summary="testB findings", finished=True),
+            # S4
+            CycleResult(summary="fixes done", finished=True),
+        ]
+    )
+    team = {"worker": make_agent()}
+
+    with patch("kodo.viewer.open_viewer", create=True):
+        result = orch.run("goal", tmp_project, team, max_cycles=10, plan=plan)
+
+    assert len(result.stage_results) == 4
+    assert all(sr.finished for sr in result.stage_results)
+
+
+@patch("kodo.orchestrators.base.open_viewer", create=True)
+def test_parallel_stages_summaries_feed_next(mock_viewer, tmp_project):
+    """After parallel group, subsequent stage should see both summaries."""
+    plan = _make_parallel_plan()
+    orch = FakeOrchestrator(
+        cycle_results=[
+            CycleResult(summary="setup done", finished=True),
+            CycleResult(summary="FINDINGS_FROM_A", finished=True),
+            CycleResult(summary="FINDINGS_FROM_B", finished=True),
+            CycleResult(summary="fixes done", finished=True),
+        ]
+    )
+    team = {"worker": make_agent()}
+
+    with patch("kodo.viewer.open_viewer", create=True):
+        orch.run("goal", tmp_project, team, max_cycles=10, plan=plan)
+
+    # The last cycle (stage 4) should have both parallel summaries in its goal
+    fix_goal = orch._cycle_calls[-1]["goal"]
+    assert "FINDINGS_FROM_A" in fix_goal
+    assert "FINDINGS_FROM_B" in fix_goal
+
+
+@patch("kodo.orchestrators.base.open_viewer", create=True)
+def test_parallel_stages_share_snapshot(mock_viewer, tmp_project):
+    """Parallel stages should see the same prior summaries, not each other's."""
+    plan = _make_parallel_plan()
+    orch = FakeOrchestrator(
+        cycle_results=[
+            CycleResult(summary="setup done", finished=True),
+            CycleResult(summary="A result", finished=True),
+            CycleResult(summary="B result", finished=True),
+            CycleResult(summary="fix done", finished=True),
+        ]
+    )
+    team = {"worker": make_agent()}
+
+    with patch("kodo.viewer.open_viewer", create=True):
+        orch.run("goal", tmp_project, team, max_cycles=10, plan=plan)
+
+    # Both parallel stages should see "setup done" but not each other
+    # Calls 1 and 2 are the parallel stages (call 0 is stage 1)
+    parallel_goals = [orch._cycle_calls[1]["goal"], orch._cycle_calls[2]["goal"]]
+    for g in parallel_goals:
+        assert "setup done" in g
+
+
+@patch("kodo.orchestrators.base.open_viewer", create=True)
+def test_parallel_stages_disable_auto_commit(mock_viewer, tmp_project):
+    """Parallel stages should not auto-commit (changes are discarded anyway)."""
+    plan = _make_parallel_plan()
+
+    auto_commit_per_call = []
+
+    class TrackingOrchestrator(FakeOrchestrator):
+        def cycle(self, goal, project_dir, team, *, max_exchanges=30,
+                  prior_summary="", browser_testing=False, verifiers=None,
+                  auto_commit=False):
+            auto_commit_per_call.append(auto_commit)
+            return super().cycle(
+                goal, project_dir, team, max_exchanges=max_exchanges,
+                prior_summary=prior_summary, browser_testing=browser_testing,
+                verifiers=verifiers, auto_commit=auto_commit,
+            )
+
+    orch = TrackingOrchestrator(
+        cycle_results=[
+            CycleResult(summary="s1", finished=True),
+            CycleResult(summary="s2", finished=True),
+            CycleResult(summary="s3", finished=True),
+            CycleResult(summary="s4", finished=True),
+        ]
+    )
+    team = {"worker": make_agent()}
+
+    with patch("kodo.viewer.open_viewer", create=True):
+        orch.run("goal", tmp_project, team, max_cycles=10, plan=plan,
+                 auto_commit=True)
+
+    # Stage 1: auto_commit=True, stages 2+3: False (parallel/worktree), stage 4: True
+    assert auto_commit_per_call[0] is True   # stage 1
+    # Parallel stages (order may vary due to threading)
+    parallel_commits = sorted(auto_commit_per_call[1:3])
+    assert parallel_commits == [False, False]
+    assert auto_commit_per_call[3] is True   # stage 4
+
+
+# ── Worktree helper tests ───────────────────────────────────────────────
+
+
+@pytest.fixture
+def git_project(tmp_path: Path) -> Path:
+    """Create a real git repo for worktree tests."""
+    import subprocess
+
+    project = tmp_path / "repo"
+    project.mkdir()
+    subprocess.run(["git", "init"], cwd=project, capture_output=True, check=True)
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-m", "init"],
+        cwd=project,
+        capture_output=True,
+        check=True,
+        env={**__import__("os").environ, "GIT_AUTHOR_NAME": "test",
+             "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "test",
+             "GIT_COMMITTER_EMAIL": "t@t"},
+    )
+    return project
+
+
+class TestWorktreeHelpers:
+    def test_create_worktree(self, git_project):
+        wt, branch = create_worktree(git_project, "test-label")
+        assert wt.exists()
+        assert (wt / ".git").exists()  # worktree has a .git file (not dir)
+        # Branch was created with unique suffix
+        import subprocess
+        branches = subprocess.run(
+            ["git", "branch"], cwd=git_project, capture_output=True, text=True
+        ).stdout
+        assert branch in branches
+        assert branch.startswith("kodo-test-label-")
+        # Clean up
+        remove_worktree(git_project, wt, branch)
+
+    def test_no_branch_collision(self, git_project):
+        """Multiple calls with same label produce unique branches."""
+        wt1, b1 = create_worktree(git_project, "same")
+        wt2, b2 = create_worktree(git_project, "same")
+        assert b1 != b2
+        assert wt1 != wt2
+        remove_worktree(git_project, wt1, b1)
+        remove_worktree(git_project, wt2, b2)
+
+    def test_worktree_is_isolated(self, git_project):
+        """Files written in worktree don't appear in main repo."""
+        wt, branch = create_worktree(git_project, "isolated")
+        (wt / "new_file.txt").write_text("hello from worktree")
+        assert not (git_project / "new_file.txt").exists()
+        remove_worktree(git_project, wt, branch)
+
+    def test_remove_worktree(self, git_project):
+        wt, branch = create_worktree(git_project, "to-remove")
+        assert wt.exists()
+        remove_worktree(git_project, wt, branch)
+        assert not wt.exists()
+        # Branch should be deleted too
+        import subprocess
+        branches = subprocess.run(
+            ["git", "branch"], cwd=git_project, capture_output=True, text=True
+        ).stdout
+        assert branch not in branches
+
+    def test_remove_worktree_discards_changes(self, git_project):
+        """Source modifications in worktree are lost after removal."""
+        # Add a file to main repo first
+        (git_project / "src.py").write_text("original")
+        import subprocess
+        subprocess.run(["git", "add", "."], cwd=git_project, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "add src"],
+            cwd=git_project,
+            capture_output=True,
+            env={**__import__("os").environ, "GIT_AUTHOR_NAME": "test",
+                 "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "test",
+                 "GIT_COMMITTER_EMAIL": "t@t"},
+        )
+
+        wt, branch = create_worktree(git_project, "modify-test")
+        # Modify file in worktree
+        (wt / "src.py").write_text("modified in worktree")
+        # Remove worktree
+        remove_worktree(git_project, wt, branch)
+        # Main repo is untouched
+        assert (git_project / "src.py").read_text() == "original"
+
+
+# ── Parallel stages with worktree isolation tests ────────────────────────
+
+
+@patch("kodo.orchestrators.base.open_viewer", create=True)
+def test_parallel_stages_use_worktrees(mock_viewer, tmp_path):
+    """Parallel stages should receive worktree paths, not the main project dir."""
+    # Set up a real git repo so worktrees can be created
+    import subprocess
+
+    project = tmp_path / "repo"
+    project.mkdir()
+    subprocess.run(["git", "init"], cwd=project, capture_output=True, check=True)
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-m", "init"],
+        cwd=project, capture_output=True, check=True,
+        env={**__import__("os").environ, "GIT_AUTHOR_NAME": "test",
+             "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "test",
+             "GIT_COMMITTER_EMAIL": "t@t"},
+    )
+
+    log.init(RunDir.create(tmp_path))
+    plan = _make_parallel_plan()
+
+    project_dirs_seen: list[str] = []
+
+    class DirTrackingOrchestrator(FakeOrchestrator):
+        def cycle(self, goal, project_dir, team, *, max_exchanges=30,
+                  prior_summary="", browser_testing=False, verifiers=None,
+                  auto_commit=False):
+            project_dirs_seen.append(str(project_dir))
+            return super().cycle(
+                goal, project_dir, team, max_exchanges=max_exchanges,
+                prior_summary=prior_summary, browser_testing=browser_testing,
+                verifiers=verifiers, auto_commit=auto_commit,
+            )
+
+    orch = DirTrackingOrchestrator(
+        cycle_results=[
+            CycleResult(summary="s1", finished=True),
+            CycleResult(summary="s2", finished=True),
+            CycleResult(summary="s3", finished=True),
+            CycleResult(summary="s4", finished=True),
+        ]
+    )
+    team = {"worker": make_agent()}
+
+    with patch("kodo.viewer.open_viewer", create=True):
+        result = orch.run("goal", project, team, max_cycles=10, plan=plan)
+
+    assert len(result.stage_results) == 4
+
+    # Stage 1 and 4 should use the main project dir
+    assert project_dirs_seen[0] == str(project)
+    assert project_dirs_seen[3] == str(project)
+
+    # Stages 2 and 3 (parallel) should use worktree paths, not main project
+    parallel_dirs = set(project_dirs_seen[1:3])
+    for d in parallel_dirs:
+        assert d != str(project), "Parallel stage should run in worktree"
+        assert "kodo-stage-" in d
+
+    # Worktrees should be cleaned up after parallel group finishes
+    for d in parallel_dirs:
+        assert not Path(d).exists(), f"Worktree {d} should be cleaned up"
+
+
+@patch("kodo.orchestrators.base.open_viewer", create=True)
+def test_parallel_falls_back_without_git(mock_viewer, tmp_path):
+    """If git worktree creation fails, fall back to project_dir."""
+    # tmp_path is NOT a git repo — worktree creation will fail
+    log.init(RunDir.create(tmp_path))
+    plan = _make_parallel_plan()
+
+    project_dirs_seen: list[str] = []
+
+    class DirTrackingOrchestrator(FakeOrchestrator):
+        def cycle(self, goal, project_dir, team, *, max_exchanges=30,
+                  prior_summary="", browser_testing=False, verifiers=None,
+                  auto_commit=False):
+            project_dirs_seen.append(str(project_dir))
+            return super().cycle(
+                goal, project_dir, team, max_exchanges=max_exchanges,
+                prior_summary=prior_summary, browser_testing=browser_testing,
+                verifiers=verifiers, auto_commit=auto_commit,
+            )
+
+    orch = DirTrackingOrchestrator(
+        cycle_results=[
+            CycleResult(summary="s1", finished=True),
+            CycleResult(summary="s2", finished=True),
+            CycleResult(summary="s3", finished=True),
+            CycleResult(summary="s4", finished=True),
+        ]
+    )
+    team = {"worker": make_agent()}
+
+    with patch("kodo.viewer.open_viewer", create=True):
+        result = orch.run("goal", tmp_path, team, max_cycles=10, plan=plan)
+
+    # Should still complete — all stages fall back to project_dir
+    assert len(result.stage_results) == 4
+    assert all(d == str(tmp_path) for d in project_dirs_seen)

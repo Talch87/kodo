@@ -31,19 +31,8 @@ from kodo.user_config import get_user_default
 
 
 _IMPROVE_GOAL = """\
-Analyze this codebase and produce a concrete improvement report.
-
-1. Run the existing test suite — note any failures or flaky tests.
-2. Run linters/type-checkers if configured (ruff, mypy, pyright, eslint, tsc …).
-3. Read through the core modules and flag:
-   • obvious bugs or logic errors
-   • dead code / unused imports
-   • missing error handling
-   • security concerns (hardcoded secrets, unsanitised input, etc.)
-   • performance hot-spots
-4. For every issue found, either:
-   a. **Auto-fix** it (if the fix is safe and unambiguous), or
-   b. **Flag it** with a one-line description and suggested fix.
+Thoroughly test and improve this codebase using a structured sequence of testing \
+methodologies. Produce a concrete improvement report at `{report_path}`.
 
 Write your findings to `{report_path}` in this format:
 
@@ -57,8 +46,160 @@ Write your findings to `{report_path}` in this format:
 - <file>:<line> — <description + suggested fix>
 ```
 
-Commit all auto-fixes in a single commit with message "chore: auto-fix issues found by kodo improve".
+Commit all auto-fixes in a single commit with message \
+"chore: auto-fix issues found by kodo improve".
 """
+
+_IMPROVE_TIME_GUIDANCE = """\
+**Time efficiency is critical.** This codebase may be large or involve slow \
+operations (e.g. AI API calls, network requests, heavy builds). You MUST be \
+smart about time:
+- Mock or stub expensive external calls (APIs, databases, network) rather than \
+calling them for real.
+- Use targeted, focused tests — not exhaustive sweeps of every file.
+- Set short timeouts on any subprocess you run. Kill anything that hangs.
+- Prefer testing a representative sample of critical paths over 100% coverage.
+- If a test takes more than 30 seconds, abort it and move on.
+- Engineer your test setup for speed: in-memory fixtures, lightweight fakes, \
+skip heavy initialization."""
+
+
+def _build_improve_plan(report_path: str) -> GoalPlan:
+    """Build a hardcoded staged plan for --improve mode.
+
+    Stages 2 and 3 run in parallel (``parallel_group=1``) and write findings
+    to separate files.  Stage 4 reads those files to produce the consolidated
+    fix & report.  Parallel stages run in git worktrees for isolation.
+    """
+    run_dir = str(Path(report_path).parent)
+    happy_findings = f"{run_dir}/findings-happy-path.md"
+    adversarial_findings = f"{run_dir}/findings-adversarial.md"
+
+    return GoalPlan(
+        context=(
+            "You are improving an existing codebase. Your job is to find real bugs "
+            "and issues by actually RUNNING the software, not just reading code. "
+            "Think like a QA engineer, not a code reviewer.\n\n"
+            f"{_IMPROVE_TIME_GUIDANCE}"
+        ),
+        stages=[
+            GoalStage(
+                index=1,
+                name="Baseline & Static Analysis",
+                description=(
+                    "Run the existing test suite and note any failures or flaky tests. "
+                    "Run linters/type-checkers if configured (ruff, mypy, pyright, "
+                    "eslint, tsc, etc.). Read through core modules and flag: obvious "
+                    "bugs, dead code, unused imports, missing error handling, security "
+                    "concerns (hardcoded secrets, unsanitised input), performance "
+                    "hot-spots. Run coverage if available and note critical uncovered "
+                    "paths.\n\n"
+                    "This is the analytical sweep — do it all in one pass, quickly. "
+                    "The real value comes in the next stages where you actually run "
+                    "the software."
+                ),
+                acceptance_criteria=(
+                    "Test results documented. Lint/type-check results documented. "
+                    "List of statically-identified issues with file:line references. "
+                    "Coverage gaps noted for critical code paths."
+                ),
+            ),
+            GoalStage(
+                index=2,
+                name="Happy Path Integration Testing",
+                parallel_group=1,
+                description=(
+                    "Actually USE the software the way a real user would. Identify "
+                    "the primary user workflows and run them end-to-end.\n\n"
+                    "**Methodology — Scenario Testing:**\n"
+                    "1. Read the README, CLI help, or entry points to understand the "
+                    "main user-facing commands/APIs.\n"
+                    "2. Identify 3-5 core user scenarios (e.g. 'user runs the main "
+                    "command with typical inputs', 'user configures and launches').\n"
+                    "3. For each scenario: set up realistic inputs, run the actual "
+                    "command/function, verify the output is correct.\n"
+                    "4. Write integration tests for any scenario that isn't already "
+                    "covered.\n\n"
+                    f"{_IMPROVE_TIME_GUIDANCE}\n\n"
+                    "**Key:** Engineer fast test setups. Mock external services "
+                    "(AI APIs, network calls) with realistic fakes. Use temp dirs "
+                    "for file operations. The goal is to exercise real code paths "
+                    "quickly, not to make real API calls.\n\n"
+                    "**IMPORTANT:** Do NOT modify source code. Write all findings "
+                    f"to `{happy_findings}`."
+                ),
+                acceptance_criteria=(
+                    "Core user workflows identified and tested end-to-end. "
+                    "Integration tests written or existing gaps documented. "
+                    "All happy-path scenarios pass or bugs are documented. "
+                    f"Detailed findings written to {happy_findings}."
+                ),
+            ),
+            GoalStage(
+                index=3,
+                name="Exploratory & Adversarial Testing",
+                parallel_group=1,
+                description=(
+                    "Now break it. Use exploratory and negative testing techniques "
+                    "to find bugs that happy-path testing misses.\n\n"
+                    "**Methodology — Exploratory Testing:**\n"
+                    "Use the software freely with a loose charter. Follow your "
+                    "intuition. Try things a user might accidentally do. Try "
+                    "unusual combinations.\n\n"
+                    "**Methodology — Boundary Value & Negative Testing:**\n"
+                    "- Feed edge-case inputs: empty strings, None, zero, negative "
+                    "numbers, extremely long strings, special characters, unicode.\n"
+                    "- Try invalid configurations: missing config files, partial "
+                    "configs, wrong types in config values.\n"
+                    "- Test error paths: what happens when a dependency is missing? "
+                    "When a file doesn't exist? When permissions are wrong?\n"
+                    "- Interrupt operations mid-way if possible.\n"
+                    "- Try flag/argument combinations that aren't documented.\n\n"
+                    f"{_IMPROVE_TIME_GUIDANCE}\n\n"
+                    "**Key:** Focus on areas the static analysis (Stage 1) flagged "
+                    "as having weak error handling or missing validation. Write "
+                    "test cases for bugs you find.\n\n"
+                    "**IMPORTANT:** Do NOT modify source code. Write all findings "
+                    f"to `{adversarial_findings}`."
+                ),
+                acceptance_criteria=(
+                    "Edge cases and error paths tested. Bugs found are documented "
+                    "with reproduction steps. Test cases written for discovered issues. "
+                    f"Detailed findings written to {adversarial_findings}."
+                ),
+            ),
+            GoalStage(
+                index=4,
+                name="Fix & Report",
+                description=(
+                    "Consolidate everything found across all stages. Read the detailed "
+                    f"findings files:\n"
+                    f"- `{happy_findings}`\n"
+                    f"- `{adversarial_findings}`\n\n"
+                    "For every issue:\n"
+                    "a. **Auto-fix** it if the fix is safe and unambiguous, or\n"
+                    "b. **Flag it** with a one-line description and suggested fix.\n\n"
+                    f"Write the final report to `{report_path}` using this format:\n\n"
+                    "```markdown\n"
+                    "# Improve Report\n\n"
+                    "## Auto-fixed\n"
+                    "- <file>:<line> — <description of what was fixed>\n\n"
+                    "## Needs decision\n"
+                    "- <file>:<line> — <description + suggested fix>\n"
+                    "```\n\n"
+                    "Commit all auto-fixes in a single commit with message "
+                    '"chore: auto-fix issues found by kodo improve".\n\n'
+                    "Include issues from ALL stages — static analysis, happy path "
+                    "failures, and adversarial/exploratory findings."
+                ),
+                acceptance_criteria=(
+                    f"Report written to {report_path} with Auto-fixed and Needs "
+                    "decision sections. All auto-fixes committed. Report covers "
+                    "findings from all prior stages."
+                ),
+            ),
+        ],
+    )
 
 
 _BACKEND_LABELS = {
@@ -1252,15 +1393,15 @@ def _main_inner() -> None:
     # 3. Create run directory
     run_dir = RunDir.create(project_dir)
 
-    # Construct --improve goal now that we have a run_dir
-    if args.improve:
-        report_path = run_dir.root / "improve-report.md"
-        goal_text = _IMPROVE_GOAL.format(report_path=report_path)
-
+    # Construct --improve goal and staged plan now that we have a run_dir
     # 4. Intake / goal plan
     plan: GoalPlan | None = None
 
-    if non_interactive:
+    if args.improve:
+        report_path = run_dir.root / "improve-report.md"
+        goal_text = _IMPROVE_GOAL.format(report_path=report_path)
+        plan = _build_improve_plan(str(report_path))
+    elif non_interactive:
         existing_plan = _load_goal_plan(run_dir)
         if existing_plan:
             plan = existing_plan

@@ -1,6 +1,6 @@
 [project]
 name = "kodo"
-version = "0.4.33"
+version = "0.4.34"
 requires-python = ">=3.13"
 dependencies = [
     "claude-agent-sdk>=0.1.36",
@@ -32,3 +32,9 @@ kodo = ["*.html"]
 
 [project.scripts]
 kodo = "kodo.cli:main"
+
+[tool.ruff.lint.per-file-ignores]
+# Scripts often need sys.path manipulation or other setup before imports; E402 is unfixable.
+"scripts/**" = ["E402"]
+# CLI needs load_dotenv() before kodo imports (env vars for API keys).
+"kodo/cli.py" = ["E402"]

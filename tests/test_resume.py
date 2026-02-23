@@ -266,7 +266,7 @@ def test_init_append_preserves_existing(tmp_path: Path):
     assert result == f
 
     content = f.read_text()
-    lines = [l for l in content.strip().split("\n") if l]
+    lines = [line for line in content.strip().split("\n") if line]
     assert len(lines) == 2  # original + run_resumed
     last = json.loads(lines[-1])
     assert last["event"] == "run_resumed"

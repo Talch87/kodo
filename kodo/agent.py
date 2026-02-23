@@ -154,6 +154,15 @@ class Agent:
             session_queries=self.session.stats.queries,
         )
 
+    def clone(self) -> "Agent":
+        """Create a new Agent with a fresh session copy (no shared state)."""
+        return Agent(
+            session=self.session.clone(),
+            description=self.description,
+            max_turns=self.max_turns,
+            timeout_s=self.timeout_s,
+        )
+
     def close(self) -> None:
         """Clean up the underlying session if it supports it."""
         if hasattr(self.session, "close"):

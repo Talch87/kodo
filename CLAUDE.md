@@ -15,8 +15,8 @@ uv run pytest tests/cli/test_intake.py -v
 uv run pytest tests/ -k "test_name" -v
 
 # Lint and format
-ruff check kodo/ tests/
-ruff format kodo/ tests/
+ruff check kodo/ tests/ scripts/
+ruff format kodo/ tests/ scripts/
 ```
 
 ## Architecture

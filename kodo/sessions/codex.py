@@ -24,6 +24,11 @@ class CodexSession(SubprocessSession):
         self._session_id: str | None = resume_session_id
         self._sandbox = sandbox
 
+    def clone(self) -> "CodexSession":
+        """Create a fresh session with the same config but no state."""
+        return CodexSession(model=self.model, system_prompt=self.system_prompt,
+                            sandbox=self._sandbox)
+
     @property
     def cost_bucket(self) -> str:
         return "codex_subscription"

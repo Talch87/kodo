@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -22,6 +24,7 @@ class GoalStage:
     description: str  # full prose for orchestrator
     acceptance_criteria: str  # verifiable "done" definition
     browser_testing: bool = False  # whether this stage needs browser verification
+    parallel_group: int | None = None  # stages with same group run concurrently
 
 
 @dataclass
@@ -545,6 +548,79 @@ def compose_stage_goal(
     return "\n\n".join(parts)
 
 
+def clone_team(team: TeamConfig) -> TeamConfig:
+    """Create a deep copy of a team with fresh sessions (no shared state)."""
+    return {name: agent.clone() for name, agent in team.items()}
+
+
+def create_worktree(project_dir: Path, label: str) -> tuple[Path, str]:
+    """Create a git worktree for isolated parallel execution.
+
+    Returns ``(worktree_dir, branch_name)``.  The worktree is placed in a
+    temp directory (outside the repo) and uses a unique branch name to avoid
+    collisions with leftover branches from crashed runs.
+    """
+    import tempfile
+    import uuid
+
+    suffix = uuid.uuid4().hex[:8]
+    branch_name = f"kodo-{label}-{suffix}"
+    worktree_dir = Path(tempfile.mkdtemp(prefix=f"kodo-{label}-"))
+    # mkdtemp already created the dir; git worktree add wants a non-existing
+    # target, so remove the empty dir first.
+    worktree_dir.rmdir()
+    subprocess.run(
+        ["git", "worktree", "add", str(worktree_dir), "-b", branch_name, "HEAD"],
+        cwd=project_dir,
+        capture_output=True,
+        check=True,
+    )
+    return worktree_dir, branch_name
+
+
+def remove_worktree(project_dir: Path, worktree_dir: Path, branch_name: str) -> None:
+    """Remove a git worktree and its branch."""
+    subprocess.run(
+        ["git", "worktree", "remove", str(worktree_dir), "--force"],
+        cwd=project_dir,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "branch", "-D", branch_name],
+        cwd=project_dir,
+        capture_output=True,
+    )
+    if worktree_dir.exists():
+        shutil.rmtree(worktree_dir, ignore_errors=True)
+
+
+
+def execution_groups(plan: GoalPlan) -> list[list[GoalStage]]:
+    """Group stages into execution order for sequential and parallel running.
+
+    Returns a list of groups. Each group is either ``[single_stage]`` (run
+    sequentially) or ``[stage, stage, ...]`` (stages with the same
+    ``parallel_group`` value, run concurrently).
+
+    Parallel groups are inserted at the position of their *first* member in the
+    original stage list.
+    """
+    groups: list[list[GoalStage]] = []
+    active: dict[int, list[GoalStage]] = {}
+
+    for stage in plan.stages:
+        if stage.parallel_group is None:
+            groups.append([stage])
+        elif stage.parallel_group not in active:
+            bucket: list[GoalStage] = [stage]
+            active[stage.parallel_group] = bucket
+            groups.append(bucket)
+        else:
+            active[stage.parallel_group].append(stage)
+
+    return groups
+
+
 @dataclass
 class ResumeState:
     """State for resuming a previously interrupted run."""
@@ -774,6 +850,111 @@ class OrchestratorBase:
 
             prior_summary = cycle_result.summary
 
+    def _run_one_stage(
+        self,
+        stage: GoalStage,
+        plan: GoalPlan,
+        project_dir: Path,
+        team: TeamConfig,
+        stage_summaries: list[str],
+        *,
+        max_exchanges: int,
+        max_cycles_for_stage: int,
+        initial_prior_summary: str = "",
+        verifiers: dict | None = None,
+        auto_commit: bool = False,
+    ) -> StageResult:
+        """Run a single stage through its cycle loop. Returns the StageResult.
+
+        This is the inner loop extracted from _run_staged so it can be called
+        both sequentially and from a ThreadPoolExecutor for parallel groups.
+        """
+        from kodo import log
+
+        log.emit(
+            "stage_start",
+            stage_index=stage.index,
+            stage_name=stage.name,
+            max_cycles=max_cycles_for_stage,
+        )
+        log.tprint(
+            f"\n[orchestrator] === STAGE {stage.index}/{len(plan.stages)}: "
+            f"{stage.name} ==="
+        )
+
+        stage_goal = compose_stage_goal(plan, stage.index, stage_summaries)
+        prior_summary = initial_prior_summary
+        stage_res = StageResult(
+            stage_index=stage.index,
+            stage_name=stage.name,
+        )
+
+        cycles_used = 0
+        while cycles_used < max_cycles_for_stage:
+            cycles_used += 1
+
+            log.tprint(
+                f"\n[orchestrator] === CYCLE {cycles_used}/{max_cycles_for_stage} "
+                f"(stage {stage.index}) ==="
+            )
+            log.emit(
+                "run_cycle",
+                orchestrator=self._orchestrator_name,
+                cycle=cycles_used,
+                max_cycles=max_cycles_for_stage,
+                stage_index=stage.index,
+            )
+
+            cycle_result = self.cycle(
+                stage_goal,
+                project_dir,
+                team,
+                max_exchanges=max_exchanges,
+                prior_summary=prior_summary,
+                browser_testing=stage.browser_testing,
+                verifiers=verifiers,
+                auto_commit=auto_commit,
+            )
+            cycle_result.stage_index = stage.index
+            stage_res.cycles.append(cycle_result)
+
+            if cycle_result.finished:
+                stage_res.finished = True
+                stage_res.summary = cycle_result.summary
+                log.emit(
+                    "stage_end",
+                    stage_index=stage.index,
+                    stage_name=stage.name,
+                    finished=True,
+                    summary=cycle_result.summary[:1000],
+                    cycles_used=len(stage_res.cycles),
+                )
+                log.tprint(
+                    f"[orchestrator] Stage {stage.index} ({stage.name}) "
+                    f"completed in {len(stage_res.cycles)} cycle(s)"
+                )
+                break
+
+            prior_summary = cycle_result.summary
+        else:
+            # max_cycles exhausted
+            stage_res.summary = prior_summary
+            log.emit(
+                "stage_end",
+                stage_index=stage.index,
+                stage_name=stage.name,
+                finished=False,
+                summary=prior_summary[:1000],
+                cycles_used=len(stage_res.cycles),
+                reason="max_cycles_exhausted",
+            )
+            log.tprint(
+                f"[orchestrator] Stage {stage.index} ({stage.name}) "
+                f"— budget exhausted after {len(stage_res.cycles)} cycle(s)"
+            )
+
+        return stage_res
+
     def _run_staged(
         self,
         goal: str,
@@ -788,10 +969,18 @@ class OrchestratorBase:
         verifiers: dict | None = None,
         auto_commit: bool = False,
     ) -> None:
-        """Staged execution: iterate over plan stages with a shared cycle budget."""
+        """Staged execution: iterate over plan stages with a shared cycle budget.
+
+        Supports parallel execution: stages with the same ``parallel_group``
+        run concurrently via ThreadPoolExecutor.  Each parallel stage runs in
+        its own git worktree for filesystem isolation — any source modifications
+        are discarded when the worktree is cleaned up.  Findings files (under
+        ``~/.kodo/runs/``) are outside the worktree and persist normally.
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
         from kodo import log
 
-        global_cycle = 0
         stage_summaries: list[str] = []
 
         # Resume support: skip completed stages
@@ -799,107 +988,186 @@ class OrchestratorBase:
         if resume and resume.completed_stages:
             start_stage_idx = len(resume.completed_stages)
             stage_summaries = list(resume.stage_summaries)
-            global_cycle = resume.completed_cycles
 
-        for stage in plan.stages[start_stage_idx:]:
-            log.emit(
-                "stage_start",
-                stage_index=stage.index,
-                stage_name=stage.name,
-                global_cycle=global_cycle,
-                max_cycles=max_cycles,
-            )
-            log.tprint(
-                f"\n[orchestrator] === STAGE {stage.index}/{len(plan.stages)}: "
-                f"{stage.name} ==="
-            )
+        # Build execution groups, then skip already-completed ones.
+        # Each group is [stage] (sequential) or [stage, stage, ...] (parallel).
+        groups = execution_groups(plan)
 
-            stage_goal = compose_stage_goal(plan, stage.index, stage_summaries)
-            prior_summary = ""
-            stage_res = StageResult(
-                stage_index=stage.index,
-                stage_name=stage.name,
-            )
+        # Figure out which groups to skip based on resume state
+        remaining_groups: list[list[GoalStage]] = []
+        for group in groups:
+            max_idx = max(s.index for s in group)
+            if max_idx > start_stage_idx:
+                remaining_groups.append(group)
 
-            # Resume: if we're resuming mid-stage, use the prior summary
-            if (
-                resume
-                and resume.current_stage_cycles > 0
-                and stage.index == start_stage_idx + 1
-            ):
-                prior_summary = resume.prior_summary
+        # Divide cycle budget across remaining groups
+        remaining_cycles = max_cycles - (resume.completed_cycles if resume else 0)
 
-            stage_finished = False
-            while global_cycle < max_cycles:
-                global_cycle += 1
-                cycle_num = global_cycle
+        for group in remaining_groups:
+            if remaining_cycles <= 0:
+                log.tprint("[orchestrator] Stopping run — cycle budget exhausted")
+                break
 
-                log.tprint(
-                    f"\n[orchestrator] === CYCLE {cycle_num}/{max_cycles} "
-                    f"(stage {stage.index}) ==="
-                )
-                log.emit(
-                    "run_cycle",
-                    orchestrator=self._orchestrator_name,
-                    cycle=cycle_num,
-                    max_cycles=max_cycles,
-                    stage_index=stage.index,
-                )
+            if len(group) == 1:
+                # Sequential: single stage gets remaining budget
+                stage = group[0]
+                initial_prior = ""
+                if (
+                    resume
+                    and resume.current_stage_cycles > 0
+                    and stage.index == start_stage_idx + 1
+                ):
+                    initial_prior = resume.prior_summary
 
-                cycle_result = self.cycle(
-                    stage_goal,
+                stage_res = self._run_one_stage(
+                    stage,
+                    plan,
                     project_dir,
                     team,
+                    stage_summaries,
                     max_exchanges=max_exchanges,
-                    prior_summary=prior_summary,
-                    browser_testing=stage.browser_testing,
+                    max_cycles_for_stage=remaining_cycles,
+                    initial_prior_summary=initial_prior,
                     verifiers=verifiers,
                     auto_commit=auto_commit,
                 )
-                cycle_result.stage_index = stage.index
-                result.cycles.append(cycle_result)
-                stage_res.cycles.append(cycle_result)
 
-                if cycle_result.finished:
-                    stage_finished = True
-                    stage_res.finished = True
-                    stage_res.summary = cycle_result.summary
-                    stage_summaries.append(cycle_result.summary)
-                    log.emit(
-                        "stage_end",
-                        stage_index=stage.index,
-                        stage_name=stage.name,
-                        finished=True,
-                        summary=cycle_result.summary[:1000],
-                        cycles_used=len(stage_res.cycles),
-                    )
+                remaining_cycles -= len(stage_res.cycles)
+                result.cycles.extend(stage_res.cycles)
+                result.stage_results.append(stage_res)
+
+                if stage_res.finished:
+                    stage_summaries.append(stage_res.summary)
+                else:
                     log.tprint(
-                        f"[orchestrator] Stage {stage.index} ({stage.name}) "
-                        f"completed in {len(stage_res.cycles)} cycle(s)"
+                        "[orchestrator] Stopping run — stage did not complete"
                     )
                     break
-
-                prior_summary = cycle_result.summary
             else:
-                # max_cycles exhausted
-                stage_res.summary = prior_summary
-                log.emit(
-                    "stage_end",
-                    stage_index=stage.index,
-                    stage_name=stage.name,
-                    finished=False,
-                    summary=prior_summary[:1000],
-                    cycles_used=len(stage_res.cycles),
-                    reason="max_cycles_exhausted",
+                # Parallel group: split budget evenly, run concurrently
+                per_stage_cycles = max(1, remaining_cycles // len(group))
+                stage_labels = ", ".join(
+                    f"{s.index}:{s.name}" for s in group
                 )
                 log.tprint(
-                    f"[orchestrator] Stage {stage.index} ({stage.name}) "
-                    f"— budget exhausted after {len(stage_res.cycles)} cycle(s)"
+                    f"\n[orchestrator] === PARALLEL GROUP: {stage_labels} ==="
+                )
+                log.emit(
+                    "parallel_group_start",
+                    stages=[s.index for s in group],
+                    per_stage_cycles=per_stage_cycles,
                 )
 
-            result.stage_results.append(stage_res)
+                # Snapshot stage_summaries so all parallel stages see the same
+                # prior context (they shouldn't see each other's results).
+                summaries_snapshot = list(stage_summaries)
+                futures_map: dict = {}
 
-            if not stage_finished:
-                # Stage failed or budget exhausted — stop the run
-                log.tprint("[orchestrator] Stopping run — stage did not complete")
-                break
+                # Each parallel stage gets its own cloned team (fresh
+                # sessions) so agents aren't shared across threads.
+                stage_teams: dict[int, TeamConfig] = {
+                    stage.index: clone_team(team) for stage in group
+                }
+
+                # Create git worktrees for isolation.  Each parallel stage
+                # runs in its own worktree so it cannot corrupt the main
+                # working directory even if it writes files.
+                worktrees: dict[int, tuple[Path, str]] = {}
+                for stage in group:
+                    try:
+                        wt_dir, branch = create_worktree(
+                            project_dir, f"stage-{stage.index}"
+                        )
+                        worktrees[stage.index] = (wt_dir, branch)
+                        log.tprint(
+                            f"[orchestrator] Worktree for stage "
+                            f"{stage.index}: {wt_dir}"
+                        )
+                    except (subprocess.CalledProcessError, OSError) as exc:
+                        log.tprint(
+                            f"[orchestrator] Worktree creation failed for "
+                            f"stage {stage.index}, using project dir: {exc}"
+                        )
+
+                with ThreadPoolExecutor(
+                    max_workers=len(group)
+                ) as pool:
+                    for stage in group:
+                        stage_dir = (
+                            worktrees[stage.index][0]
+                            if stage.index in worktrees
+                            else project_dir
+                        )
+                        future = pool.submit(
+                            self._run_one_stage,
+                            stage,
+                            plan,
+                            stage_dir,
+                            stage_teams[stage.index],
+                            summaries_snapshot,
+                            max_exchanges=max_exchanges,
+                            max_cycles_for_stage=per_stage_cycles,
+                            verifiers=verifiers,
+                            auto_commit=False,
+                        )
+                        futures_map[future] = stage
+
+                    # Collect results as they finish
+                    parallel_results: list[StageResult] = []
+                    for future in as_completed(futures_map):
+                        stage = futures_map[future]
+                        try:
+                            stage_res = future.result()
+                        except Exception as exc:
+                            log.tprint(
+                                f"[orchestrator] Stage {stage.index} "
+                                f"({stage.name}) crashed: {exc}"
+                            )
+                            log.emit(
+                                "stage_error",
+                                stage_index=stage.index,
+                                error=str(exc),
+                            )
+                            stage_res = StageResult(
+                                stage_index=stage.index,
+                                stage_name=stage.name,
+                                summary=f"Stage crashed: {exc}",
+                            )
+                        parallel_results.append(stage_res)
+                        result.cycles.extend(stage_res.cycles)
+                        result.stage_results.append(stage_res)
+
+                # Clean up cloned sessions and worktrees
+                for st in stage_teams.values():
+                    for agent in st.values():
+                        agent.close()
+                for stage_idx, (wt_dir, branch) in worktrees.items():
+                    try:
+                        remove_worktree(project_dir, wt_dir, branch)
+                    except Exception as exc:
+                        log.tprint(
+                            f"[orchestrator] Worktree cleanup failed for "
+                            f"stage {stage_idx}: {exc}"
+                        )
+
+                # Sort summaries by stage index for deterministic ordering
+                parallel_results.sort(key=lambda r: r.stage_index)
+                # For parallel work, count the max branch (wall-clock)
+                remaining_cycles -= max(
+                    len(r.cycles) for r in parallel_results
+                )
+
+                # Add all parallel summaries to context for subsequent stages
+                for pr in parallel_results:
+                    stage_summaries.append(pr.summary)
+
+                log.emit(
+                    "parallel_group_end",
+                    stages=[r.stage_index for r in parallel_results],
+                    total_cycles=sum(
+                        len(r.cycles) for r in parallel_results
+                    ),
+                    all_finished=all(
+                        r.finished for r in parallel_results
+                    ),
+                )

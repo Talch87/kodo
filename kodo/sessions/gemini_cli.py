@@ -25,6 +25,10 @@ class GeminiCliSession(SubprocessSession):
         # We track whether to pass --resume on the next query.
         self._has_queried = False
 
+    def clone(self) -> "GeminiCliSession":
+        """Create a fresh session with the same config but no state."""
+        return GeminiCliSession(model=self.model, system_prompt=self.system_prompt)
+
     @property
     def cost_bucket(self) -> str:
         return "gemini_api"

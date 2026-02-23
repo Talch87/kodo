@@ -22,6 +22,10 @@ class CursorSession(SubprocessSession):
         super().__init__(model, system_prompt)
         self._chat_id: str | None = resume_chat_id
 
+    def clone(self) -> "CursorSession":
+        """Create a fresh session with the same config but no state."""
+        return CursorSession(model=self.model, system_prompt=self.system_prompt)
+
     @property
     def cost_bucket(self) -> str:
         return "cursor_subscription"
