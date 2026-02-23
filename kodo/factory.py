@@ -198,9 +198,7 @@ def _build_team_saga(
         )
 
     if _has_claude:
-        worker_smart_session = make_session(
-            "claude", "opus", fallback_model="sonnet"
-        )
+        worker_smart_session = make_session("claude", "opus", fallback_model="sonnet")
         team["worker_smart"] = Agent(
             worker_smart_session,
             _WORKER_SMART_DESC + _WORKER_SMART_SAGA_EXTRA,

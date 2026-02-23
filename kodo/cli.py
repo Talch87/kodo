@@ -195,7 +195,9 @@ def run_intake_chat(
     model = "opus" if backend == "claude" else "composer-1.5"
     session = make_session(backend, model, system_prompt=prompt)
 
-    print(f"\n  {_DIM}Intake interview — type {_BOLD}/done{_RESET}{_DIM} or empty line to finish{_RESET}")
+    print(
+        f"\n  {_DIM}Intake interview — type {_BOLD}/done{_RESET}{_DIM} or empty line to finish{_RESET}"
+    )
     _print_separator()
 
     # First message — agent explores the project and asks clarifying questions
@@ -203,7 +205,12 @@ def run_intake_chat(
     initial = f"Here's my project goal:\n\n{goal_text}"
     with _Spinner("Reviewing project"):
         result = session.query(initial, project_dir, max_turns=10)
-    log.emit("intake_response", text=result.text, is_error=result.is_error, turns=result.turns)
+    log.emit(
+        "intake_response",
+        text=result.text,
+        is_error=result.is_error,
+        turns=result.turns,
+    )
     _print_agent(result.text)
 
     # Conversation loop — always wait for user input, even if the agent
@@ -220,7 +227,12 @@ def run_intake_chat(
 
         with _Spinner("Thinking"):
             result = session.query(user_input, project_dir, max_turns=10)
-        log.emit("intake_response", text=result.text, is_error=result.is_error, turns=result.turns)
+        log.emit(
+            "intake_response",
+            text=result.text,
+            is_error=result.is_error,
+            turns=result.turns,
+        )
         _print_agent(result.text)
 
     _print_separator()

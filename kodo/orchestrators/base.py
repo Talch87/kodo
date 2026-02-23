@@ -175,9 +175,7 @@ def handle_agent_call(
     if agent_result.is_error:
         log.tprint(f"[{agent_name}] reported error")
     if agent_result.context_reset:
-        log.tprint(
-            f"[{agent_name}] context reset: {agent_result.context_reset_reason}"
-        )
+        log.tprint(f"[{agent_name}] context reset: {agent_result.context_reset_reason}")
 
     log.print_stats_table()
 
