@@ -275,7 +275,9 @@ class TestAutoRefine:
     def test_falls_back_to_response_text_when_no_file(self, project):
         """If session doesn't write a file, wrap its response as refinement."""
         run_dir = RunDir.create(project, "test_auto_fallback")
-        session = FakeSession(response_text="Implicit: needs pagination and rate limiting")
+        session = FakeSession(
+            response_text="Implicit: needs pagination and rate limiting"
+        )
 
         with patch("kodo.cli.make_session", return_value=session):
             result = run_intake_auto("claude", run_dir, "Build an API")

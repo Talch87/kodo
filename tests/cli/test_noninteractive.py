@@ -14,7 +14,6 @@ from tests.conftest import make_scripted_session
 from kodo.cli import (
     _build_params_from_flags,
     _extract_section,
-    _IMPROVE_GOAL,
     run_intake_noninteractive,
     _main_inner,
 )
@@ -439,7 +438,10 @@ class TestImproveFlag:
             sys.argv = ["kodo", "--improve", str(project)]
             _main_inner()
             goal_arg = mock_launch.call_args[0][1]
-            assert "improvement report" in goal_arg.lower() or "improve" in goal_arg.lower()
+            assert (
+                "improvement report" in goal_arg.lower()
+                or "improve" in goal_arg.lower()
+            )
             assert "improve-report.md" in goal_arg
 
     def test_improve_skips_intake(self, project):

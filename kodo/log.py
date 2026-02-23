@@ -383,6 +383,7 @@ class RunState:
     completed_stages: list[int]
     stage_summaries: list[str]
     current_stage_cycles: int
+    pending_exchanges: list[dict] = field(default_factory=list)
 
 
 def parse_run(log_file: Path) -> RunState | None:

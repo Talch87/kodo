@@ -24,9 +24,7 @@ def project(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _fake_launch(
-    run_dir, goal_text, params, plan=None, json_mode=False, **kwargs
-):
+def _fake_launch(run_dir, goal_text, params, plan=None, json_mode=False, **kwargs):
     """Fake launch_run that returns a successful RunResult."""
     return RunResult(
         cycles=[
@@ -244,12 +242,18 @@ class TestImproveJsonOutput:
             "- baz.py:5 — consider refactoring\n"
         )
 
-        def _launch_with_report(run_dir, goal_text, params, plan=None, json_mode=False, **kw):
+        def _launch_with_report(
+            run_dir, goal_text, params, plan=None, json_mode=False, **kw
+        ):
             # Write the report file into the run dir
             report_path = run_dir.root / "improve-report.md"
             report_path.write_text(report_content)
             return RunResult(
-                cycles=[CycleResult(exchanges=5, total_cost_usd=0.01, finished=True, summary="Done")],
+                cycles=[
+                    CycleResult(
+                        exchanges=5, total_cost_usd=0.01, finished=True, summary="Done"
+                    )
+                ],
             )
 
         with (

@@ -7,6 +7,7 @@ Usage: python -m kodo.viewer <logfile.jsonl>
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import webbrowser
@@ -17,11 +18,19 @@ _EMBED_MARKER = "/*__EMBED_MARKER__*/"
 
 
 def open_viewer(log_path: Path | None = None) -> None:
+    if os.environ.get("KODO_NO_VIEWER"):
+        return
+
     template = _VIEWER_HTML.read_text()
 
     if log_path is not None:
         lines = log_path.read_text().strip().splitlines()
-        events = [json.loads(line) for line in lines]
+        events = []
+        for line in lines:
+            try:
+                events.append(json.loads(line))
+            except (json.JSONDecodeError, ValueError):
+                pass  # skip corrupt lines
         embed = f"EMBEDDED_DATA = {json.dumps(events)};"
         # Escape </script> so HTML parser doesn't close the script tag early
         embed = embed.replace("</script>", "<\\/script>")

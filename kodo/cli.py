@@ -745,6 +745,7 @@ def launch_resume(run_dir: RunDir, state: log.RunState):
         completed_stages=state.completed_stages,
         stage_summaries=state.stage_summaries,
         current_stage_cycles=state.current_stage_cycles,
+        pending_exchanges=state.pending_exchanges,
     )
 
     # Load goal plan if this was a staged run
@@ -766,6 +767,10 @@ def launch_resume(run_dir: RunDir, state: log.RunState):
         )
     if state.agent_session_ids:
         print(f"Resuming sessions: {', '.join(state.agent_session_ids.keys())}")
+    if state.pending_exchanges:
+        print(
+            f"Resuming mid-cycle: {len(state.pending_exchanges)} exchange(s) to restore"
+        )
     print(f"Log: {state.log_file}")
     print()
 
@@ -820,7 +825,9 @@ def _emit_json_and_exit(args, result, improve_report: str | None = None) -> None
     if not args.json:
         return
     sys.stdout = _original_stdout
-    print(json.dumps(_format_json_output(result, improve_report=improve_report), indent=2))
+    print(
+        json.dumps(_format_json_output(result, improve_report=improve_report), indent=2)
+    )
     sys.exit(EXIT_SUCCESS if result.finished else EXIT_PARTIAL)
 
 
@@ -1334,12 +1341,20 @@ def _main_inner() -> None:
         report_path = run_dir.root / "improve-report.md"
         if report_path.exists():
             report_content = report_path.read_text()
-            auto_fixed = len(re.findall(
-                r"^- .+$", _extract_section(report_content, "Auto-fixed"), re.MULTILINE
-            ))
-            needs_decision = len(re.findall(
-                r"^- .+$", _extract_section(report_content, "Needs decision"), re.MULTILINE
-            ))
+            auto_fixed = len(
+                re.findall(
+                    r"^- .+$",
+                    _extract_section(report_content, "Auto-fixed"),
+                    re.MULTILINE,
+                )
+            )
+            needs_decision = len(
+                re.findall(
+                    r"^- .+$",
+                    _extract_section(report_content, "Needs decision"),
+                    re.MULTILINE,
+                )
+            )
             print(f"\n{'=' * 50}")
             print(f"Improve report: {report_path}")
             print(f"  Auto-fixed:     {auto_fixed}")

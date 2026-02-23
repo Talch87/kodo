@@ -208,9 +208,7 @@ def _auto_commit(
         log.emit("auto_commit_skip", reason="no_worker")
         return
 
-    worker_name = next(
-        (n for n, a in team.items() if a is worker), "worker"
-    )
+    worker_name = next((n for n, a in team.items() if a is worker), "worker")
 
     directive = (
         "Review `git diff` and `git status`. Stage the relevant changed files "
@@ -557,6 +555,7 @@ class ResumeState:
     completed_stages: list[int]
     stage_summaries: list[str]
     current_stage_cycles: int
+    pending_exchanges: list[dict] = field(default_factory=list)
 
 
 class Orchestrator(Protocol):

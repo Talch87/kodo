@@ -51,7 +51,6 @@ def test_agent_crash_returns_error_string(tmp_path: Path):
     crash_agent = Agent(crash_session, "crasher", max_turns=5)
 
     # Make the agent's run method raise
-    original_run = crash_agent.run
 
     def crashing_run(*args, **kwargs):
         raise RuntimeError("agent exploded")
@@ -84,7 +83,7 @@ def test_agent_crash_returns_error_string(tmp_path: Path):
 
     with patch("kodo.orchestrators.api.Agent.__init__", fake_agent_init):
         orch = ApiOrchestrator(model="claude-opus-4-6")
-        result = orch.cycle("build feature", tmp_path, team, max_exchanges=10)
+        orch.cycle("build feature", tmp_path, team, max_exchanges=10)
 
     # Should not crash, and the tool result should contain the error
     assert len(tool_results) == 1

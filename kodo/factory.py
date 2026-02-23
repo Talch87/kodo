@@ -89,7 +89,7 @@ class Mode:
     name: str
     description: str
     system_prompt: str
-    build_team: Callable[[float | None], TeamConfig]
+    build_team: Callable[..., TeamConfig]
     default_max_exchanges: int
     default_max_cycles: int
 
