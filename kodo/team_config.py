@@ -6,10 +6,13 @@ import json
 import logging
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from kodo import make_session
 from kodo.agent import Agent
 from kodo.factory import available_backends
 from kodo.orchestrators.base import TeamConfig
+from kodo.schemas import TeamConfigSchema, validate_team_config
 
 logger = logging.getLogger(__name__)
 
@@ -54,18 +57,45 @@ def load_team_config(name: str, project_dir: Path) -> dict | None:
 
 
 def _load_json(path: Path) -> dict:
-    """Load and validate basic JSON structure."""
+    """Load and validate team config JSON structure.
+    
+    Validates against TeamConfigSchema, providing detailed error messages.
+    """
     try:
         data = json.loads(path.read_text())
     except json.JSONDecodeError as exc:
         raise ValueError(f"Invalid JSON in {path}: {exc}") from exc
-    if not isinstance(data, dict):
+    
+    # Validate against schema
+    try:
+        validated = validate_team_config(data)
+        # Return the validated data as dict for backward compatibility
+        return {
+            "name": validated.name,
+            "agents": {
+                name: {
+                    "backend": agent.backend.value,
+                    "model": agent.model,
+                    "description": agent.description,
+                    "max_turns": agent.max_turns,
+                    "timeout_s": agent.timeout_s,
+                    "system_prompt": agent.system_prompt,
+                    "fallback_model": agent.fallback_model,
+                }
+                for name, agent in validated.agents.items()
+            },
+        }
+    except ValidationError as exc:
+        # Provide detailed validation error messages
+        error_details = []
+        for error in exc.errors():
+            loc = " → ".join(str(x) for x in error["loc"])
+            msg = error["msg"]
+            error_details.append(f"  {loc}: {msg}")
+        
         raise ValueError(
-            f"Team config must be a JSON object, got {type(data).__name__} in {path}"
-        )
-    if "agents" not in data or not isinstance(data["agents"], dict):
-        raise ValueError(f"Team config must have an 'agents' dict in {path}")
-    return data
+            f"Invalid team config in {path}:\n" + "\n".join(error_details)
+        ) from exc
 
 
 def build_team_from_json(config: dict) -> TeamConfig:
