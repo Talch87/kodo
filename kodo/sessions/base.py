@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import threading
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from kodo.errors import AgentError
 
 
 @dataclass
@@ -19,6 +24,7 @@ class QueryResult:
     input_tokens: int | None = None
     output_tokens: int | None = None
     usage_raw: dict | None = field(default=None, repr=False)
+    error: AgentError | None = field(default=None, repr=False)
 
 
 @dataclass
@@ -141,9 +147,33 @@ class Session(Protocol):
     def reset(self) -> None: ...
 
 
+<<<<<<< HEAD
 # ---------------------------------------------------------------------------
 # Retry strategy for transient failures (429 rate limits, 529 overloads)
 # ---------------------------------------------------------------------------
+=======
+class RetryableSession(Protocol):
+    """Session that supports automatic retry with exponential backoff."""
+    
+    def query_with_retry(
+        self,
+        prompt: str,
+        project_dir: Path,
+        *,
+        max_turns: int,
+        max_retries: int = 3,
+        initial_delay_s: float = 1.0,
+    ) -> QueryResult:
+        """Execute query with automatic retry on retriable errors.
+        
+        Uses exponential backoff with jitter for transient failures.
+        """
+        ...
+
+
+class SubprocessSession:
+    """Base for subprocess-backed sessions (Cursor, Codex, Gemini CLI).
+>>>>>>> a7b8d01 (PR #3: Add session retry integration with exponential backoff)
 
 
 @dataclass
@@ -204,6 +234,7 @@ class RetryStrategy:
     ) -> "QueryResult":
         """Call *fn* with retries on transient errors.
 
+<<<<<<< HEAD
         Parameters
         ----------
         fn : callable
@@ -236,3 +267,115 @@ class RetryStrategy:
         # Should never reach here, but satisfy type checker
         assert last_error is not None
         raise last_error
+=======
+    def reset(self) -> None:
+        """Reset shared state.  Subclasses should log, clear their own state,
+        then call ``super().reset()``."""
+        self._stats = SessionStats()
+        self._system_prompt_sent = False
+
+
+class SessionRetryMixin:
+    """Mixin to add automatic retry logic with exponential backoff to any session.
+    
+    Example usage:
+        class MySession(SubprocessSession, SessionRetryMixin):
+            def query(self, ...): ...
+        
+        session = MySession(model="gpt-4")
+        result = session.query_with_retry(prompt, project_dir, max_turns=30)
+    """
+    
+    def query_with_retry(
+        self,
+        prompt: str,
+        project_dir: Path,
+        *,
+        max_turns: int,
+        max_retries: int = 3,
+        initial_delay_s: float = 1.0,
+        backoff_multiplier: float = 2.0,
+    ) -> QueryResult:
+        """Execute query with automatic retry on retriable errors.
+        
+        Args:
+            prompt: The query prompt
+            project_dir: Project directory for context
+            max_turns: Max turns for the query
+            max_retries: Maximum retry attempts (default: 3)
+            initial_delay_s: Initial backoff delay in seconds (default: 1.0)
+            backoff_multiplier: Exponential backoff multiplier (default: 2.0)
+        
+        Returns:
+            QueryResult with error field populated if error occurred
+        
+        Retries automatically on:
+            - Timeout errors
+            - Rate limit (429) errors
+            - Temporary API failures
+            - Network errors
+            - Context overflow errors
+        
+        Does not retry on:
+            - Authentication failures
+            - Invalid input
+            - Resource not found
+            - Unsupported operations
+        """
+        from kodo.errors import AgentError, ErrorContext
+        
+        last_error = None
+        
+        for attempt in range(max_retries + 1):
+            try:
+                result = self.query(prompt, project_dir, max_turns=max_turns)  # type: ignore
+                return result
+            
+            except Exception as e:
+                # Classify the error
+                error = AgentError.from_exception(
+                    e,
+                    context=ErrorContext(
+                        task_summary=prompt[:100],
+                        step_number=attempt,
+                        session_tokens_used=self.stats.total_tokens,  # type: ignore
+                        session_queries_count=self.stats.queries,  # type: ignore
+                    ),
+                )
+                last_error = error
+                
+                # Check if we should retry
+                if attempt >= max_retries or not error.retriable:
+                    # Return error result
+                    return QueryResult(
+                        text=str(e),
+                        elapsed_s=0.0,
+                        is_error=True,
+                        turns=0,
+                        error=error,
+                    )
+                
+                # Calculate backoff delay
+                delay = initial_delay_s * (backoff_multiplier ** attempt)
+                
+                # Log retry attempt
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    f"Query failed ({error.error_type.value}), retrying in {delay:.1f}s "
+                    f"(attempt {attempt + 1}/{max_retries})"
+                )
+                
+                # Sleep before retry
+                time.sleep(delay)
+        
+        # Shouldn't reach here, but just in case
+        assert last_error is not None
+        return QueryResult(
+            text=f"Failed after {max_retries} retries: {last_error.message}",
+            elapsed_s=0.0,
+            is_error=True,
+            turns=0,
+            error=last_error,
+        )
+>>>>>>> a7b8d01 (PR #3: Add session retry integration with exponential backoff)
