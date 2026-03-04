@@ -76,10 +76,8 @@ class AgentConfigSchema(BaseModel):
     
     @field_validator("backend")
     @classmethod
-    def validate_backend(cls, v: str) -> str:
+    def validate_backend(cls, v: BackendType) -> BackendType:
         """Ensure backend is known."""
-        if v not in [b.value for b in BackendType]:
-            raise ValueError(f"Unknown backend: {v}. Must be one of: {[b.value for b in BackendType]}")
         return v
     
     @field_validator("model")
