@@ -160,7 +160,13 @@ class TestSessionRetryMixin:
         session = MockSessionWithRetry()
         
         # Create a non-retriable error (auth failure)
-        with patch.object(session, 'query', side_effect=Exception("401 Unauthorized")):
+        call_count = 0
+        def auth_failure(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            raise Exception("401 Unauthorized")
+        
+        with patch.object(session, 'query', side_effect=auth_failure):
             result = session.query_with_retry(
                 "Test prompt",
                 Path("/tmp"),
@@ -171,8 +177,8 @@ class TestSessionRetryMixin:
         assert result.is_error is True
         assert result.error is not None
         assert result.error.error_type == ErrorType.AUTHENTICATION_FAILURE
-        # Should not retry auth failures
-        assert session.query_call_count == 1  # Only tried once
+        # Should not retry auth failures — only called once
+        assert call_count == 1
     
     def test_custom_max_retries(self):
         """Custom max_retries parameter is respected."""
