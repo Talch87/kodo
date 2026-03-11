@@ -48,6 +48,12 @@ class AgentCommunicationHub:
         # In-memory message queues
         self.pending_messages: Dict[str, List[AgentMessage]] = {}
         self.message_history: List[AgentMessage] = []
+        
+        # Performance optimization: caching for frequently accessed data
+        self._conversation_cache: Dict[str, List[tuple]] = {}
+        self._conversation_cache_dirty = False
+        self._bottleneck_cache: Optional[List[str]] = None
+        self._bottleneck_cache_dirty = False
     
     def send_message(
         self,
@@ -75,6 +81,10 @@ class AgentCommunicationHub:
         self._log_message(message)
         self.message_history.append(message)
         
+        # Invalidate caches
+        self._conversation_cache_dirty = True
+        self._bottleneck_cache_dirty = True
+        
         return message
     
     def get_pending_messages(self, agent: str) -> List[AgentMessage]:
@@ -90,12 +100,32 @@ class AgentCommunicationHub:
             self._log_message(msg)
     
     def get_agent_conversations(self, agent: str) -> List[tuple]:
-        """Get all conversations involving an agent."""
-        conversations = []
-        for msg in self.message_history:
-            if msg.sender == agent or msg.recipient == agent:
-                conversations.append((msg.sender, msg.recipient, msg.message_type.value, msg.content, msg.response))
-        return conversations
+        """Get all conversations involving an agent. (Cached for performance)"""
+        # Rebuild cache if needed
+        if self._conversation_cache_dirty:
+            self._conversation_cache.clear()
+            for msg in self.message_history:
+                sender = msg.sender
+                recipient = msg.recipient
+                
+                # Add to sender's cache
+                if sender not in self._conversation_cache:
+                    self._conversation_cache[sender] = []
+                self._conversation_cache[sender].append(
+                    (msg.sender, msg.recipient, msg.message_type.value, msg.content, msg.response)
+                )
+                
+                # Add to recipient's cache (if different from sender)
+                if recipient != sender:
+                    if recipient not in self._conversation_cache:
+                        self._conversation_cache[recipient] = []
+                    self._conversation_cache[recipient].append(
+                        (msg.sender, msg.recipient, msg.message_type.value, msg.content, msg.response)
+                    )
+            
+            self._conversation_cache_dirty = False
+        
+        return self._conversation_cache.get(agent, [])
     
     def format_messages_for_agent(self, agent: str) -> str:
         """Format pending messages as a prompt for an agent."""
@@ -129,7 +159,11 @@ class AgentCommunicationHub:
         return "\n".join(lines)
     
     def generate_collaboration_suggestions(self) -> List[str]:
-        """Analyze message patterns and suggest collaborations."""
+        """Analyze message patterns and suggest collaborations. (Cached for performance)"""
+        # Return cached result if available
+        if not self._bottleneck_cache_dirty and self._bottleneck_cache is not None:
+            return self._bottleneck_cache
+        
         suggestions = []
         
         # Count who talks to whom
@@ -149,6 +183,9 @@ class AgentCommunicationHub:
                 suggestions.append(
                     f"Agent '{agent}' received {count} messages - consider doing pair programming"
                 )
+        
+        self._bottleneck_cache = suggestions
+        self._bottleneck_cache_dirty = False
         
         return suggestions
     

@@ -45,6 +45,21 @@ class DependencyGraph:
     def __init__(self):
         self.tasks: Dict[str, Task] = {}
         self.execution_log: Path = Path(".kodo/execution_plan.jsonl")
+        
+        # Performance optimization: memoization caches
+        self._topological_order_cache: Optional[List[str]] = None
+        self._critical_path_cache: Optional[tuple] = None
+        self._parallelizable_tasks_cache: Optional[List[Set[str]]] = None
+        self._bottleneck_cache: Optional[List[Tuple[str, int]]] = None
+        self._cache_valid = False
+    
+    def _invalidate_caches(self) -> None:
+        """Invalidate all computation caches when graph structure changes."""
+        self._topological_order_cache = None
+        self._critical_path_cache = None
+        self._parallelizable_tasks_cache = None
+        self._bottleneck_cache = None
+        self._cache_valid = False
     
     def add_task(
         self,
@@ -65,12 +80,14 @@ class DependencyGraph:
             dependencies=set(depends_on or []),
         )
         self.tasks[task_id] = task
+        self._invalidate_caches()
         return task
     
     def add_dependency(self, task_id: str, depends_on: str) -> None:
         """Add a dependency between tasks."""
         if task_id in self.tasks:
             self.tasks[task_id].dependencies.add(depends_on)
+            self._invalidate_caches()
     
     def is_valid_dag(self) -> Tuple[bool, Optional[str]]:
         """Check if the graph is a valid DAG (no cycles)."""
@@ -99,7 +116,10 @@ class DependencyGraph:
         return True, None
     
     def get_topological_order(self) -> List[str]:
-        """Get tasks in topological order (respecting dependencies)."""
+        """Get tasks in topological order (respecting dependencies). (Cached)"""
+        if self._topological_order_cache is not None:
+            return self._topological_order_cache
+        
         visited = set()
         order = []
         
@@ -109,21 +129,26 @@ class DependencyGraph:
             visited.add(task_id)
             
             # Visit dependencies first
-            for dep in self.tasks[task_id].dependencies:
-                dfs(dep)
+            if task_id in self.tasks:
+                for dep in self.tasks[task_id].dependencies:
+                    dfs(dep)
             
             order.append(task_id)
         
         for task_id in self.tasks:
             dfs(task_id)
         
+        self._topological_order_cache = order
         return order
     
     def get_critical_path(self) -> Tuple[List[str], float]:
         """
         Find the critical path (longest path through dependencies).
-        Critical path determines minimum time to completion.
+        Critical path determines minimum time to completion. (Cached)
         """
+        if self._critical_path_cache is not None:
+            return self._critical_path_cache
+        
         # This is simplified - real implementation would use more sophisticated algorithm
         order = self.get_topological_order()
         
@@ -132,24 +157,31 @@ class DependencyGraph:
         
         # Simple calculation: just sum dependencies
         for task_id in order:
+            if task_id not in self.tasks:
+                continue
             task = self.tasks[task_id]
             if task.dependencies:
                 dep_time = sum(
                     self.tasks[dep].estimated_duration_s
                     for dep in task.dependencies
+                    if dep in self.tasks
                 )
                 total = dep_time + task.estimated_duration_s
                 if total > max_time:
                     max_time = total
                     max_path = list(task.dependencies) + [task_id]
         
-        return max_path, max_time
+        self._critical_path_cache = (max_path, max_time)
+        return (max_path, max_time)
     
     def get_parallelizable_tasks(self) -> List[Set[str]]:
         """
         Find groups of tasks that can run in parallel.
-        Returns list of sets, each set can run simultaneously.
+        Returns list of sets, each set can run simultaneously. (Cached)
         """
+        if self._parallelizable_tasks_cache is not None:
+            return self._parallelizable_tasks_cache
+        
         order = self.get_topological_order()
         levels = []
         processed = set()
@@ -158,7 +190,7 @@ class DependencyGraph:
             # Find tasks whose dependencies are all processed
             current_level = set()
             for task_id in order:
-                if task_id not in processed:
+                if task_id not in processed and task_id in self.tasks:
                     if self.tasks[task_id].dependencies.issubset(processed):
                         current_level.add(task_id)
             
@@ -168,13 +200,17 @@ class DependencyGraph:
             else:
                 break
         
+        self._parallelizable_tasks_cache = levels
         return levels
     
     def get_bottleneck_tasks(self) -> List[Tuple[str, int]]:
         """
         Find tasks that many other tasks depend on.
-        These are bottlenecks in the execution plan.
+        These are bottlenecks in the execution plan. (Cached)
         """
+        if self._bottleneck_cache is not None:
+            return self._bottleneck_cache
+        
         dependency_count = {}
         
         for task_id, task in self.tasks.items():
@@ -182,7 +218,9 @@ class DependencyGraph:
                 dependency_count[dep] = dependency_count.get(dep, 0) + 1
         
         # Return sorted by dependency count
-        return sorted(dependency_count.items(), key=lambda x: x[1], reverse=True)
+        result = sorted(dependency_count.items(), key=lambda x: x[1], reverse=True)
+        self._bottleneck_cache = result
+        return result
     
     def generate_execution_plan(self) -> str:
         """Generate a human-readable execution plan."""
