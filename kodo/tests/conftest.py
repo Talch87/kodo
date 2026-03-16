@@ -6,13 +6,28 @@ from pathlib import Path
 from typing import Generator
 from unittest.mock import Mock, AsyncMock
 
+# Try to import pytest_asyncio, fall back to anyio
+try:
+    import pytest_asyncio
+except ImportError:
+    # Use anyio's async support
+    pass
+
 
 @pytest.fixture
 def event_loop() -> Generator:
     """Create event loop for async tests."""
     loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     yield loop
     loop.close()
+
+
+def pytest_configure(config):
+    """Configure pytest for async testing."""
+    if not any(p.startswith("pytest-asyncio") or p.startswith("anyio") for p in dir()):
+        # If pytest-asyncio not available, use anyio
+        pytest_plugins = ['anyio']
 
 
 @pytest.fixture
